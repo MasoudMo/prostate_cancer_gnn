@@ -10,6 +10,17 @@ import argparse
 from math import floor
 
 
+def save_checkpoint(epoch, model_state_dict, optimizer_state_dict, loss):
+
+    torch.save({
+        'epoch': epoch,
+        'model_state_dict': model_state_dict,
+        'optimizer_state_dict': optimizer_state_dict,
+        'loss': loss}, "./model_parameters.pt")
+
+    return
+
+
 def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='GCN training on Prostate Cancer dataset')
@@ -56,7 +67,7 @@ def main():
     val_data_loader = DataLoader(training_set, batch_size=batch_size, shuffle=True, collate_fn=collate)
 
     # Initialize model
-    model = GraphConvBinaryClassifier(in_dim=input_dim, hidden_dim=hidden_dim)
+    model = GraphConvBinaryClassifier(in_dim=input_dim, hidden_dim=hidden_dim, use_cuda=use_cuda)
 
     # Move model to GPU if available
     if use_cuda:
@@ -100,9 +111,12 @@ def main():
         print('Epoch {}, loss {:.4f}'.format(epoch, epoch_loss))
         epoch_losses.append(epoch_loss)
 
+        # Save model checkpoint
+        save_checkpoint(epoch, model.state_dict(), optimizer.state_dict(), loss)
+
         # Find validation loss
         model.eval()
-        with torch.no_grad:
+        with torch.no_grad():
             validation_loss = 0
             for bg, label in val_data_loader:
                 # Move label and graph to GPU if available

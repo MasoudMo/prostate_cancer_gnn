@@ -8,12 +8,13 @@ class GraphConvBinaryClassifier(nn.Module):
     """
     Classification model for the prostate cancer dataset
     """
-    def __init__(self, in_dim, hidden_dim):
+    def __init__(self, in_dim, hidden_dim, use_cuda=False):
         """
         Constructor for the GraphConvBinaryClassifier class
         Parameters:
             in_dim (int): dimension of features for each node
             hidden_dim (int): dimension of hidden embeddings
+            use_cuda (bool): Indicates whether GPU should be utilized or not
         """
         super(GraphConvBinaryClassifier, self).__init__()
 
@@ -23,6 +24,8 @@ class GraphConvBinaryClassifier(nn.Module):
         self.fc = nn.Linear(hidden_dim, 1)
         self.out_act = nn.Sigmoid()
 
+        self.use_cuda = use_cuda
+
     def forward(self, g):
         """
         Forward path of classifier
@@ -31,6 +34,9 @@ class GraphConvBinaryClassifier(nn.Module):
         """
         # Use RF signals as node features
         h = g.ndata['x']
+
+        if self.use_cuda:
+            h = h.cuda()
 
         # Two layers of Graph Convolution
         h = F.relu(self.conv1(g, h))
