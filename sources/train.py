@@ -86,7 +86,7 @@ def main():
         for bg, label in train_data_loader:
             # Move label and graph to GPU if available
             if use_cuda:
-                bg, label = bg.cuda(), label.cuda()
+                label = label.cuda()
 
             # Predict labels
             prediction = model(bg)

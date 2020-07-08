@@ -31,7 +31,7 @@ def main():
     use_cuda = torch.cuda.is_available()
 
     # Initialize the classifier
-    model = GraphConvBinaryClassifier(in_dim=input_dim, hidden_dim=hidden_dim)
+    model = GraphConvBinaryClassifier(in_dim=input_dim, hidden_dim=hidden_dim, use_cuda=use_cuda)
 
     # Load model
     model.load_state_dict(torch.load(model_path))
@@ -53,6 +53,9 @@ def main():
         y_true = []
         y_score = []
         for bg, label in test_data_loader:
+            if use_cuda:
+                label = label.cuda()
+
             y_true.append(label)
 
             # Predict labels
