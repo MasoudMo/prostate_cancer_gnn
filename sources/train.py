@@ -10,13 +10,21 @@ import argparse
 from math import floor
 
 
-def save_checkpoint(epoch, model_state_dict, optimizer_state_dict, loss):
-
+def save_checkpoint(epoch, model_state_dict, optimizer_state_dict, loss, path):
+    """
+    Saves model checkpoint for later training
+    Parameters:
+        epoch (int): Current epoch
+        model_state_dict (dict): State dictionary obtained from model.state_dict()
+        optimizer_state_dict (dict): State dictionary obtained from optimizer.state_dict()
+        loss (Tensor): current loss
+        path (str): Path to save the checkpoint to
+    """
     torch.save({
         'epoch': epoch,
         'model_state_dict': model_state_dict,
         'optimizer_state_dict': optimizer_state_dict,
-        'loss': loss}, "./model_parameters.pt")
+        'loss': loss}, path)
 
     return
 
@@ -112,7 +120,7 @@ def main():
         epoch_losses.append(epoch_loss)
 
         # Save model checkpoint
-        save_checkpoint(epoch, model.state_dict(), optimizer.state_dict(), loss)
+        save_checkpoint(epoch, model.state_dict(), optimizer.state_dict(), loss, "./model_parameters.pt")
 
         # Find validation loss
         model.eval()
