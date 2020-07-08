@@ -39,10 +39,16 @@ def main():
     parser.add_argument('--learning_rate', type=float, default='0.001', help='learning rate')
     parser.add_argument('--val_split', type=float, default='0.2', help='validation set split')
     parser.add_argument('--epochs', type=int, default='20', help='number of epochs')
-    parser.add_argument('--model_path', type=str, default='../model/', help='path to save the trained model to.')
+    parser.add_argument('--model_path', type=str, default='../model/model.pt',
+                        help='path to save the trained model to.')
+    parser.add_argument('--model_param_path', type=str, default='./model_parameters.pt',
+                        help='path to save the interim model parameters to.')
+    parser.add_argument('--knn_algorithm', type=str, default='auto', help='Algorithm used the knn graph creation')
     parser.add_argument('--k', type=int, default=10, help='Indicates the number of neighbours used in knn algorithm')
     parser.add_argument('--n_jobs', type=int, default=1, help='Indicates the number jobs to deploy for graph creation')
     parser.add_argument('--weighted', type=bool, default=False, help='Indicates whether the graph is weighted or not')
+    parser.add_argument('--load_checkpoint', type=bool, default=False,
+                        help='True if model should resume from checkpoint')
     args = parser.parse_args()
 
     input_path = args.input_path
@@ -51,17 +57,21 @@ def main():
     lr = args.learning_rate
     epochs = args.epochs
     model_path = args.model_path
+    model_param_path = args.model_param_path
     val_split = args.val_split
     k = args.k
     weighted = args.weighted
     batch_size = args.batch_size
     n_jobs = args.n_jobs
+    load_checkpoint = args.load_checkpoint
+    knn_algorithm = args.knn_algorithm
 
     # Check whether cuda is available or not
     use_cuda = torch.cuda.is_available()
 
     # Load the dataset
-    dataset = ProstateCancerDataset(input_path, train=True, k=k, weighted=weighted, n_jobs=n_jobs)
+    dataset = ProstateCancerDataset(input_path, train=True, k=k, weighted=weighted, n_jobs=n_jobs,
+                                    knn_algorithm=knn_algorithm)
     dataset_len = len(dataset)
     print("dataset has {} data points".format(dataset_len))
 
@@ -79,16 +89,29 @@ def main():
     # Initialize model
     model = GraphConvBinaryClassifier(in_dim=input_dim, hidden_dim=hidden_dim, use_cuda=use_cuda)
 
-    # Move model to GPU if available
-    if use_cuda:
-        model = model.cuda()
-
     # Initialize loss function and optimizer
     loss_func = nn.BCELoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
+    # Initialize starting epoch index
+    starting_epoch = 0
+
+    # Load saved parameters if needed
+    if load_checkpoint:
+        checkpoint = torch.load(model_param_path)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        starting_epoch = checkpoint['epoch'] + 1
+        loss = checkpoint['loss']
+
+        print("Resuming from these values --> epoch:{}  loss: {}".format(starting_epoch, loss.item()))
+
+    # Move model to GPU if available
+    if use_cuda:
+        model = model.cuda()
+
     epoch_losses = []
-    for epoch in range(epochs):
+    for epoch in range(starting_epoch, epochs):
         # Put model in train model
         model.train()
 
@@ -122,7 +145,7 @@ def main():
         epoch_losses.append(epoch_loss)
 
         # Save model checkpoint
-        save_checkpoint(epoch, model.state_dict(), optimizer.state_dict(), loss, "./model_parameters.pt")
+        save_checkpoint(epoch, model.state_dict(), optimizer.state_dict(), loss, model_param_path)
 
         # Find validation loss
         model.eval()
@@ -131,7 +154,7 @@ def main():
             for bg, label in val_data_loader:
                 # Move label and graph to GPU if available
                 if use_cuda:
-                    bg, label = bg.cuda(), label.cuda()
+                    bg, label = label.cuda()
 
                 # Predict labels
                 prediction = model(bg)

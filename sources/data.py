@@ -9,7 +9,7 @@ import torch
 import dgl
 
 
-def create_knn_adj_mat(features, k, weighted=False, n_jobs=None):
+def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto'):
     """
     Create a directed normalized adjacency matrix from input nodes based on k-nearest neighbours
     Parameters:
@@ -17,12 +17,13 @@ def create_knn_adj_mat(features, k, weighted=False, n_jobs=None):
         k (int): number of neighbours to find
         weighted (bool): set to True for weighted adjacency matrix (based on Euclidean distance)
         n_jobs (int): number of jobs to deploy
+        algorithm (str): Choose between auto, ball_tree, kd_tree or brute
     Returns:
         (coo matrix): adjacency matrix as a sparse coo matrix
     """
 
     # initialize and fit nearest neighbour algorithm
-    neigh = NearestNeighbors(n_neighbors=k, n_jobs=n_jobs)
+    neigh = NearestNeighbors(n_neighbors=k, n_jobs=n_jobs, algorithm='ball_tree')
     neigh.fit(features)
 
     # Obtain the binary adjacency matrix
@@ -116,7 +117,7 @@ class ProstateCancerDataset(Dataset):
     Dataset class for the prostate cancer dataset
     """
 
-    def __init__(self, mat_file_path, train=True, weighted=False, k=10, n_jobs=1):
+    def __init__(self, mat_file_path, train=True, weighted=False, k=10, n_jobs=1, knn_algorithm='auto'):
         """
         Constructor for the prostate cancer dataset class
         Parameters:
@@ -125,6 +126,7 @@ class ProstateCancerDataset(Dataset):
             weighted (bool): Indicates whether created graph is weighted or not
             k (int): Number of neighbours to use for the K-nearest neighbour algorithm
             n_jobs (int): Number of jobs to deploy for graph creation
+            knn_algorithm (str): Choose between auto, ball_tree, kd_tree or brute for the graph creation algorithm
         """
 
         # Load the .mat file
@@ -143,6 +145,7 @@ class ProstateCancerDataset(Dataset):
         self.weighted = weighted
         self.k = k
         self.n_jobs = n_jobs
+        self.knn_algorithm = knn_algorithm
 
     def __getitem__(self, idx):
         """
@@ -161,7 +164,11 @@ class ProstateCancerDataset(Dataset):
         data = np.array(self.prostate_cancer_mat_data[self.mat_data[idx, 0]][()].transpose(), dtype=np.float32)
 
         # Create the graph using knn
-        graph = create_knn_adj_mat(data, k=self.k, weighted=self.weighted, n_jobs=self.n_jobs)
+        graph = create_knn_adj_mat(data,
+                                   k=self.k,
+                                   weighted=self.weighted,
+                                   n_jobs=self.n_jobs,
+                                   algorithm=self.knn_algorithm)
 
         # Create a dgl graph from coo_matrix
         g = dgl.DGLGraph()

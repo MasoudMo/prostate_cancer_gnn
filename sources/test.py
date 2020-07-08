@@ -15,6 +15,7 @@ def main():
     parser.add_argument('--batch_size', type=int, default='1', help='Numbers of cores in a batch')
     parser.add_argument('--hidden_dim', type=int, default='100', help='hidden layer dimension')
     parser.add_argument('--model_path', type=str, default='../model/', help='path to save the trained model to.')
+    parser.add_argument('--knn_algorithm', type=str, default='auto', help='Algorithm used the knn graph creation')
     parser.add_argument('--k', type=int, default=10, help='Indicates the number of neighbours used in knn algorithm')
     parser.add_argument('--weighted', type=bool, default=False, help='Indicates whether the graph is weighted or not')
     parser.add_argument('--n_jobs', type=int, default=1, help='Indicates the number jobs to deploy for graph creation')
@@ -28,6 +29,7 @@ def main():
     weighted = args.weighted
     batch_size = args.batch_size
     n_jobs = args.n_jobs
+    knn_algorithm = args.knn_algorithm
 
     # Check if cuda is available
     use_cuda = torch.cuda.is_available()
@@ -46,7 +48,13 @@ def main():
     model.eval()
 
     # Load test dataset
-    test_set = ProstateCancerDataset(input_path, train=True, k=k, weighted=weighted, n_jobs=n_jobs)
+    test_set = ProstateCancerDataset(input_path,
+                                     train=True,
+                                     k=k,
+                                     weighted=weighted,
+                                     n_jobs=n_jobs,
+                                     knn_algorithm=knn_algorithm)
+
     dataset_len = len(test_set)
     print("Test dataset has {} points".format(dataset_len))
 
