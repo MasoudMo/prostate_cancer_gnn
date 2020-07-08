@@ -116,7 +116,7 @@ class ProstateCancerDataset(Dataset):
     Dataset class for the prostate cancer dataset
     """
 
-    def __init__(self, mat_file_path, train=True, weighted=False, k=10):
+    def __init__(self, mat_file_path, train=True, weighted=False, k=10, n_jobs=1):
         """
         Constructor for the prostate cancer dataset class
         Parameters:
@@ -124,6 +124,7 @@ class ProstateCancerDataset(Dataset):
             train (bool): Indicates whether train or test data is loaded
             weighted (bool): Indicates whether created graph is weighted or not
             k (int): Number of neighbours to use for the K-nearest neighbour algorithm
+            n_jobs (int): Number of jobs to deploy for graph creation
         """
 
         # Load the .mat file
@@ -141,6 +142,7 @@ class ProstateCancerDataset(Dataset):
         # Parameters used in graph creation
         self.weighted = weighted
         self.k = k
+        self.n_jobs = n_jobs
 
     def __getitem__(self, idx):
         """
@@ -159,7 +161,7 @@ class ProstateCancerDataset(Dataset):
         data = np.array(self.prostate_cancer_mat_data[self.mat_data[idx, 0]][()].transpose(), dtype=np.float32)
 
         # Create the graph using knn
-        graph = create_knn_adj_mat(data, k=self.k, weighted=self.weighted)
+        graph = create_knn_adj_mat(data, k=self.k, weighted=self.weighted, n_jobs=self.n_jobs)
 
         # Create a dgl graph from coo_matrix
         g = dgl.DGLGraph()

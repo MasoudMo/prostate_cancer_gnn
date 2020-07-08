@@ -17,6 +17,7 @@ def main():
     parser.add_argument('--model_path', type=str, default='../model/', help='path to save the trained model to.')
     parser.add_argument('--k', type=int, default=10, help='Indicates the number of neighbours used in knn algorithm')
     parser.add_argument('--weighted', type=bool, default=False, help='Indicates whether the graph is weighted or not')
+    parser.add_argument('--n_jobs', type=int, default=1, help='Indicates the number jobs to deploy for graph creation')
     args = parser.parse_args()
 
     input_path = args.input_path
@@ -26,6 +27,7 @@ def main():
     k = args.k
     weighted = args.weighted
     batch_size = args.batch_size
+    n_jobs = args.n_jobs
 
     # Check if cuda is available
     use_cuda = torch.cuda.is_available()
@@ -44,7 +46,9 @@ def main():
     model.eval()
 
     # Load test dataset
-    test_set = ProstateCancerDataset(input_path, train=True, k=k, weighted=weighted)
+    test_set = ProstateCancerDataset(input_path, train=True, k=k, weighted=weighted, n_jobs=n_jobs)
+    dataset_len = len(test_set)
+    print("Test dataset has {} points".format(dataset_len))
 
     # Create the dataloader
     test_data_loader = DataLoader(test_set, batch_size=batch_size, shuffle=True, collate_fn=collate)
