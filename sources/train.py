@@ -6,6 +6,7 @@ from torch.utils.data import random_split
 from sources.data import ProstateCancerDataset
 import torch
 from sources.model import GraphConvBinaryClassifier
+from sources.model import GraphAttConvBinaryClassifier
 import argparse
 from math import floor
 
@@ -87,7 +88,8 @@ def main():
     val_data_loader = DataLoader(training_set, batch_size=batch_size, shuffle=True, collate_fn=collate)
 
     # Initialize model
-    model = GraphConvBinaryClassifier(in_dim=input_dim, hidden_dim=hidden_dim, use_cuda=use_cuda)
+    # model = GraphConvBinaryClassifier(in_dim=input_dim, hidden_dim=hidden_dim, use_cuda=use_cuda)
+    model = GraphAttConvBinaryClassifier(in_dim=input_dim, hidden_dim=hidden_dim, use_cuda=use_cuda, num_heads=1)
 
     # Initialize loss function and optimizer
     loss_func = nn.BCELoss()
@@ -125,7 +127,7 @@ def main():
             prediction = model(bg)
 
             # Compute loss
-            loss = loss_func(prediction, label)
+            loss = loss_func(prediction[0], label)
 
             # Zero gradients
             optimizer.zero_grad()
@@ -154,7 +156,7 @@ def main():
             for bg, label in val_data_loader:
                 # Move label and graph to GPU if available
                 if use_cuda:
-                    bg, label = label.cuda()
+                    label = label.cuda()
 
                 # Predict labels
                 prediction = model(bg)
