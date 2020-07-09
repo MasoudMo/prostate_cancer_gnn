@@ -142,7 +142,7 @@ def main():
             epoch_loss += loss.detach().item()
 
         # Find and print average epoch loss
-        epoch_loss /= (dataset_len - 50)
+        epoch_loss /= training_set_len
         print('Epoch {}, loss {:.4f}'.format(epoch, epoch_loss))
         epoch_losses.append(epoch_loss)
 
@@ -162,13 +162,13 @@ def main():
                 prediction = model(bg)
 
                 # Compute loss
-                loss = loss_func(prediction, label)
+                loss = loss_func(prediction[0], label)
 
                 # Accumulate validation loss
                 validation_loss += loss.detach().item()
 
             # Compute and print validation loss
-            validation_loss /= 50
+            validation_loss /= validation_set_len
             print('Validation loss {:.4f}'.format(validation_loss))
 
     # Save the trained model
