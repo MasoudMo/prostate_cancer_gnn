@@ -7,6 +7,7 @@ from sources.data import ProstateCancerDataset
 import torch
 from sources.model import GraphConvBinaryClassifier
 from sources.model import GraphAttConvBinaryClassifier
+from sources.model import GraphSageBinaryClassifier
 import argparse
 from math import floor
 
@@ -44,6 +45,8 @@ def main():
                         help='path to save the trained model to.')
     parser.add_argument('--model_param_path', type=str, default='./model_parameters.pt',
                         help='path to save the interim model parameters to.')
+    parser.add_argument('--gnn_type', type=str, default='gcn',
+                        help='GNN type to use for the classifier {gcn, gat, graphsage}')
     parser.add_argument('--knn_algorithm', type=str, default='auto', help='Algorithm used the knn graph creation')
     parser.add_argument('--k', type=int, default=10, help='Indicates the number of neighbours used in knn algorithm')
     parser.add_argument('--n_jobs', type=int, default=1, help='Indicates the number jobs to deploy for graph creation')
@@ -66,6 +69,7 @@ def main():
     n_jobs = args.n_jobs
     load_checkpoint = args.load_checkpoint
     knn_algorithm = args.knn_algorithm
+    gnn_type = args.gnn_type
 
     # Check whether cuda is available or not
     use_cuda = torch.cuda.is_available()
@@ -88,8 +92,15 @@ def main():
     val_data_loader = DataLoader(training_set, batch_size=batch_size, shuffle=True, collate_fn=collate)
 
     # Initialize model
-    # model = GraphConvBinaryClassifier(in_dim=input_dim, hidden_dim=hidden_dim, use_cuda=use_cuda)
-    model = GraphAttConvBinaryClassifier(in_dim=input_dim, hidden_dim=hidden_dim, use_cuda=use_cuda, num_heads=1)
+    if gnn_type == 'gcn':
+        model = GraphConvBinaryClassifier(in_dim=input_dim, hidden_dim=hidden_dim, use_cuda=use_cuda)
+    elif gnn_type == 'gat':
+        model = GraphAttConvBinaryClassifier(in_dim=input_dim, hidden_dim=hidden_dim, use_cuda=use_cuda, num_heads=1)
+    elif gnn_type == 'graphsage':
+        model = GraphSageBinaryClassifier(in_dim=input_dim,
+                                          hidden_dim=hidden_dim,
+                                          use_cuda=use_cuda,
+                                          aggregator_type='mean')
 
     # Initialize loss function and optimizer
     loss_func = nn.BCELoss()
