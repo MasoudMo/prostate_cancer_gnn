@@ -58,7 +58,7 @@ class GraphAttConvBinaryClassifier(nn.Module):
     """
     Classification model for the prostate cancer dataset using GAT
     """
-    def __init__(self, in_dim, hidden_dim, num_heads=1, use_cuda=False):
+    def __init__(self, in_dim, hidden_dim, num_heads=1, feat_drop=0, attn_drop=0, use_cuda=False):
         """
         Constructor for the GraphAttConvBinaryClassifier class
         Parameters:
@@ -70,8 +70,8 @@ class GraphAttConvBinaryClassifier(nn.Module):
         super(GraphAttConvBinaryClassifier, self).__init__()
 
         # Model layers
-        self.conv1 = GATConv(in_dim, hidden_dim, num_heads=num_heads)
-        self.conv2 = GATConv(hidden_dim * num_heads, hidden_dim, num_heads=1)
+        self.conv1 = GATConv(in_dim, hidden_dim, num_heads=num_heads, feat_drop=feat_drop, attn_drop=attn_drop)
+        self.conv2 = GATConv(hidden_dim * num_heads, hidden_dim, num_heads=1, feat_drop=feat_drop, attn_drop=attn_drop)
         self.fc = nn.Linear(hidden_dim, 1)
         self.out_act = nn.Sigmoid()
 
@@ -107,7 +107,7 @@ class GraphSageBinaryClassifier(nn.Module):
     """
     Classification model for the prostate cancer dataset using GraphSage
     """
-    def __init__(self, in_dim, hidden_dim, aggregator_type='mean', use_cuda=False):
+    def __init__(self, in_dim, hidden_dim, aggregator_type='mean', feat_drop=0, use_cuda=False):
         """
         Constructor for the GraphSageBinaryClassifier class
         Parameters:
@@ -119,8 +119,8 @@ class GraphSageBinaryClassifier(nn.Module):
         super(GraphSageBinaryClassifier, self).__init__()
 
         # Model layers
-        self.conv1 = SAGEConv(in_dim, hidden_dim, aggregator_type=aggregator_type)
-        self.conv2 = SAGEConv(hidden_dim, hidden_dim, aggregator_type=aggregator_type)
+        self.conv1 = SAGEConv(in_dim, hidden_dim, aggregator_type=aggregator_type, feat_drop=feat_drop)
+        self.conv2 = SAGEConv(hidden_dim, hidden_dim, aggregator_type=aggregator_type, feat_drop=feat_drop)
         self.fc = nn.Linear(hidden_dim, 1)
         self.out_act = nn.Sigmoid()
 

@@ -1,4 +1,6 @@
 from sources.model import GraphConvBinaryClassifier
+from sources.model import GraphAttConvBinaryClassifier
+from sources.model import GraphSageBinaryClassifier
 from sources.data import ProstateCancerDataset
 from torch.utils.data import DataLoader
 from sources.data import collate
@@ -19,23 +21,62 @@ def main():
     parser.add_argument('--k', type=int, default=10, help='Indicates the number of neighbours used in knn algorithm')
     parser.add_argument('--weighted', type=bool, default=False, help='Indicates whether the graph is weighted or not')
     parser.add_argument('--n_jobs', type=int, default=1, help='Indicates the number jobs to deploy for graph creation')
+    parser.add_argument('--gnn_type', type=str, default='gcn',
+                        help='GNN type to use for the classifier {gcn, gat, graphsage}')
+    parser.add_argument('--feat_drop', type=float, default='0',
+                        help='Feature dropout rate used if gnn_type is set to graphsage or gat')
+    parser.add_argument('--attn_drop', type=float, default='0',
+                        help='Attention dropout rate used if gnn_type is set to gat')
+    parser.add_argument('--aggregator_type', type=str, default='mean',
+                        help='Aggregator used if gnn_type is set to graphsage')
+    parser.add_argument('--num_heads', type=int, default=1,
+                        help='Indicates the number of attention heads if gnn_type is gat')
     args = parser.parse_args()
 
+    # Common arguments
     input_path = args.input_path
     hidden_dim = args.hidden_dim
     input_dim = args.input_dim
     model_path = args.model_path
-    k = args.k
     weighted = args.weighted
     batch_size = args.batch_size
-    n_jobs = args.n_jobs
+    gnn_type = args.gnn_type
+
+    # KNN arguments
     knn_algorithm = args.knn_algorithm
+    n_jobs = args.n_jobs
+    k = args.k
+
+    # Gat/Graphsage-specific argument
+    feat_drop = args.feat_drop
+
+    # Graphsage argument
+    aggregator_type = args.aggregator_type
+
+    # Gat-specific arguments
+    attn_drop = args.attn_drop
+    num_head = args.num_heads
 
     # Check if cuda is available
     use_cuda = torch.cuda.is_available()
 
-    # Initialize the classifier
-    model = GraphConvBinaryClassifier(in_dim=input_dim, hidden_dim=hidden_dim, use_cuda=use_cuda)
+    # Initialize model
+    model = None
+    if gnn_type == 'gcn':
+        model = GraphConvBinaryClassifier(in_dim=input_dim, hidden_dim=hidden_dim, use_cuda=use_cuda)
+    elif gnn_type == 'gat':
+        model = GraphAttConvBinaryClassifier(in_dim=input_dim,
+                                             hidden_dim=hidden_dim,
+                                             use_cuda=use_cuda,
+                                             num_heads=num_head,
+                                             feat_drop=feat_drop,
+                                             attn_drop=attn_drop)
+    elif gnn_type == 'graphsage':
+        model = GraphSageBinaryClassifier(in_dim=input_dim,
+                                          hidden_dim=hidden_dim,
+                                          use_cuda=use_cuda,
+                                          aggregator_type=aggregator_type,
+                                          feat_drop=feat_drop)
 
     # Load model
     model.load_state_dict(torch.load(model_path))
@@ -49,12 +90,11 @@ def main():
 
     # Load test dataset
     test_set = ProstateCancerDataset(input_path,
-                                     train=True,
+                                     train=False,
                                      k=k,
                                      weighted=weighted,
                                      n_jobs=n_jobs,
                                      knn_algorithm=knn_algorithm)
-
     dataset_len = len(test_set)
     print("Test dataset has {} points".format(dataset_len))
 

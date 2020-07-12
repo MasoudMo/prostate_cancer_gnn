@@ -23,16 +23,8 @@ def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto
     """
 
     # initialize and fit nearest neighbour algorithm
-    neigh = NearestNeighbors(n_neighbors=k, n_jobs=n_jobs, algorithm='ball_tree')
+    neigh = NearestNeighbors(n_neighbors=k, n_jobs=n_jobs, algorithm=algorithm)
     neigh.fit(features)
-
-    # Obtain the binary adjacency matrix
-    adj_mat_connectivity = np.array(sp.coo_matrix(neigh.kneighbors_graph(features,
-                                                                         k,
-                                                                         mode='connectivity')).toarray())
-
-    # Remove self-connections
-    adj_mat_connectivity -= np.eye(features.shape[0])
 
     if weighted:
         # Obtain matrix with distance of k-nearest points
@@ -41,13 +33,22 @@ def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto
                                                                          mode='distance')).toarray())
 
         # Take reciprocal of non-zero elements to associate lower weight to higher distances
-        non_zero_indices = np.nonzero(adj_mat_connectivity)
+
+        non_zero_indices = np.nonzero(adj_mat_weighted)
         adj_mat_weighted[non_zero_indices] = 1 / adj_mat_weighted[non_zero_indices]
 
         # Normalize rows
         adj_mat_weighted = adj_mat_weighted / adj_mat_weighted.sum(1)[:, np.newaxis]
 
         return sp.coo_matrix(adj_mat_weighted)
+
+    # Obtain the binary adjacency matrix
+    adj_mat_connectivity = np.array(sp.coo_matrix(neigh.kneighbors_graph(features,
+                                                                         k,
+                                                                         mode='connectivity')).toarray())
+
+    # Remove self-connections
+    adj_mat_connectivity -= np.eye(features.shape[0])
 
     return sp.coo_matrix(adj_mat_connectivity)
 
@@ -185,3 +186,13 @@ class ProstateCancerDataset(Dataset):
             (int): Indicates the number of available cells
         """
         return self.num_cells
+
+
+if __name__ == '__main__':
+
+    prostate_cancer_mat_data = h5py.File('../data/BK_RF_P1_90_MICCAI_33.mat', 'r')
+    mat_data = prostate_cancer_mat_data['data_train']
+    x = np.array(prostate_cancer_mat_data[mat_data[0, 0]][()].transpose())
+    x = create_knn_adj_mat(x, weighted=True, k=10, )
+    draw_graph(x, weighted=True, directed=True)
+    print('hello')

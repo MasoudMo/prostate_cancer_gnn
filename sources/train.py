@@ -10,6 +10,7 @@ from sources.model import GraphAttConvBinaryClassifier
 from sources.model import GraphSageBinaryClassifier
 import argparse
 from math import floor
+from sklearn.metrics import roc_auc_score
 
 
 def save_checkpoint(epoch, model_state_dict, optimizer_state_dict, loss, path):
@@ -43,18 +44,27 @@ def main():
     parser.add_argument('--epochs', type=int, default='20', help='number of epochs')
     parser.add_argument('--model_path', type=str, default='../model/model.pt',
                         help='path to save the trained model to.')
-    parser.add_argument('--model_param_path', type=str, default='./model_parameters.pt',
+    parser.add_argument('--model_param_path', type=str, default='../model/model_parameters.pt',
                         help='path to save the interim model parameters to.')
     parser.add_argument('--gnn_type', type=str, default='gcn',
                         help='GNN type to use for the classifier {gcn, gat, graphsage}')
-    parser.add_argument('--knn_algorithm', type=str, default='auto', help='Algorithm used the knn graph creation')
+    parser.add_argument('--knn_algorithm', type=str, default='auto', help='Algorithm used for the knn graph creation')
     parser.add_argument('--k', type=int, default=10, help='Indicates the number of neighbours used in knn algorithm')
     parser.add_argument('--n_jobs', type=int, default=1, help='Indicates the number jobs to deploy for graph creation')
     parser.add_argument('--weighted', type=bool, default=False, help='Indicates whether the graph is weighted or not')
     parser.add_argument('--load_checkpoint', type=bool, default=False,
                         help='True if model should resume from checkpoint')
+    parser.add_argument('--feat_drop', type=float, default='0',
+                        help='Feature dropout rate used if gnn_type is set to graphsage or gat')
+    parser.add_argument('--attn_drop', type=float, default='0',
+                        help='Attention dropout rate used if gnn_type is set to gat')
+    parser.add_argument('--aggregator_type', type=str, default='mean',
+                        help='Aggregator used if gnn_type is set to graphsage')
+    parser.add_argument('--num_heads', type=int, default=1,
+                        help='Indicates the number of attention heads if gnn_type is gat')
     args = parser.parse_args()
 
+    # Common arguments
     input_path = args.input_path
     hidden_dim = args.hidden_dim
     input_dim = args.input_dim
@@ -63,13 +73,25 @@ def main():
     model_path = args.model_path
     model_param_path = args.model_param_path
     val_split = args.val_split
-    k = args.k
     weighted = args.weighted
     batch_size = args.batch_size
-    n_jobs = args.n_jobs
     load_checkpoint = args.load_checkpoint
-    knn_algorithm = args.knn_algorithm
     gnn_type = args.gnn_type
+
+    # KNN arguments
+    knn_algorithm = args.knn_algorithm
+    n_jobs = args.n_jobs
+    k = args.k
+
+    # Gat/Graphsage-specific argument
+    feat_drop = args.feat_drop
+
+    # Graphsage argument
+    aggregator_type = args.aggregator_type
+
+    # Gat-specific arguments
+    attn_drop = args.attn_drop
+    num_head = args.num_heads
 
     # Check whether cuda is available or not
     use_cuda = torch.cuda.is_available()
@@ -89,18 +111,25 @@ def main():
 
     # Create the data loaders for validation and training
     train_data_loader = DataLoader(training_set, batch_size=batch_size, shuffle=True, collate_fn=collate)
-    val_data_loader = DataLoader(training_set, batch_size=batch_size, shuffle=True, collate_fn=collate)
+    val_data_loader = DataLoader(validation_set, batch_size=batch_size, shuffle=True, collate_fn=collate)
 
     # Initialize model
+    model = None
     if gnn_type == 'gcn':
         model = GraphConvBinaryClassifier(in_dim=input_dim, hidden_dim=hidden_dim, use_cuda=use_cuda)
     elif gnn_type == 'gat':
-        model = GraphAttConvBinaryClassifier(in_dim=input_dim, hidden_dim=hidden_dim, use_cuda=use_cuda, num_heads=1)
+        model = GraphAttConvBinaryClassifier(in_dim=input_dim,
+                                             hidden_dim=hidden_dim,
+                                             use_cuda=use_cuda,
+                                             num_heads=num_head,
+                                             feat_drop=feat_drop,
+                                             attn_drop=attn_drop)
     elif gnn_type == 'graphsage':
         model = GraphSageBinaryClassifier(in_dim=input_dim,
                                           hidden_dim=hidden_dim,
                                           use_cuda=use_cuda,
-                                          aggregator_type='mean')
+                                          aggregator_type=aggregator_type,
+                                          feat_drop=feat_drop)
 
     # Initialize loss function and optimizer
     loss_func = nn.BCELoss()
@@ -123,8 +152,8 @@ def main():
     if use_cuda:
         model = model.cuda()
 
-    epoch_losses = []
     for epoch in range(starting_epoch, epochs):
+
         # Put model in train model
         model.train()
 
@@ -155,7 +184,6 @@ def main():
         # Find and print average epoch loss
         epoch_loss /= training_set_len
         print('Epoch {}, loss {:.4f}'.format(epoch, epoch_loss))
-        epoch_losses.append(epoch_loss)
 
         # Save model checkpoint
         save_checkpoint(epoch, model.state_dict(), optimizer.state_dict(), loss, model_param_path)
@@ -163,14 +191,20 @@ def main():
         # Find validation loss
         model.eval()
         with torch.no_grad():
+            y_true = []
+            y_score = []
             validation_loss = 0
             for bg, label in val_data_loader:
                 # Move label and graph to GPU if available
                 if use_cuda:
                     label = label.cuda()
 
+                y_true.append(label)
+
                 # Predict labels
                 prediction = model(bg)
+
+                y_score.append(prediction)
 
                 # Compute loss
                 loss = loss_func(prediction[0], label)
@@ -181,6 +215,8 @@ def main():
             # Compute and print validation loss
             validation_loss /= validation_set_len
             print('Validation loss {:.4f}'.format(validation_loss))
+            acc = roc_auc_score(y_true, y_score)
+            print("Validation accuracy {:.4f}".format(acc))
 
     # Save the trained model
     torch.save(model.state_dict(), model_path)
