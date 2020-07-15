@@ -35,37 +35,59 @@ def save_checkpoint(epoch, model_state_dict, optimizer_state_dict, loss, path):
 def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='GCN training on Prostate Cancer dataset')
-    parser.add_argument('--input_path', type=str, required=True, help='path to mat file')
+    parser.add_argument('--input_path', type=str, required=True, help='path to time domain mat file')
+    parser.add_argument('--input_fft_path', type=str, required=True, help='path to frequency domain mat file')
     parser.add_argument('--input_dim', type=int, default='200', help='input (RF Signal) dimension')
     parser.add_argument('--batch_size', type=int, default='1', help='Numbers of cores in a batch')
     parser.add_argument('--hidden_dim', type=int, default='100', help='hidden layer dimension')
     parser.add_argument('--learning_rate', type=float, default='0.001', help='learning rate')
     parser.add_argument('--val_split', type=float, default='0.2', help='validation set split')
     parser.add_argument('--epochs', type=int, default='20', help='number of epochs')
-    parser.add_argument('--model_path', type=str, default='../model/model.pt',
-                        help='path to save the trained model to.')
-    parser.add_argument('--model_param_path', type=str, default='../model/model_parameters.pt',
-                        help='path to save the interim model parameters to.')
-    parser.add_argument('--gnn_type', type=str, default='gcn',
-                        help='GNN type to use for the classifier {gcn, gat, graphsage}')
     parser.add_argument('--knn_algorithm', type=str, default='auto', help='Algorithm used for the knn graph creation')
     parser.add_argument('--k', type=int, default=10, help='Indicates the number of neighbours used in knn algorithm')
     parser.add_argument('--n_jobs', type=int, default=1, help='Indicates the number jobs to deploy for graph creation')
     parser.add_argument('--weighted', type=bool, default=False, help='Indicates whether the graph is weighted or not')
-    parser.add_argument('--load_checkpoint', type=bool, default=False,
+    parser.add_argument('--model_path',
+                        type=str,
+                        default='../model/model.pt',
+                        help='path to save the trained model to.')
+    parser.add_argument('--model_param_path',
+                        type=str,
+                        default='../model/model_parameters.pt',
+                        help='path to save the interim model parameters to.')
+    parser.add_argument('--gnn_type',
+                        type=str,
+                        default='gcn',
+                        help='GNN type to use for the classifier {gcn, gat, graphsage}')
+    parser.add_argument('--load_checkpoint',
+                        type=bool,
+                        default=False,
                         help='True if model should resume from checkpoint')
-    parser.add_argument('--feat_drop', type=float, default='0',
+    parser.add_argument('--feat_drop',
+                        type=float,
+                        default='0',
                         help='Feature dropout rate used if gnn_type is set to graphsage or gat')
-    parser.add_argument('--attn_drop', type=float, default='0',
+    parser.add_argument('--attn_drop',
+                        type=float,
+                        default='0',
                         help='Attention dropout rate used if gnn_type is set to gat')
-    parser.add_argument('--aggregator_type', type=str, default='mean',
+    parser.add_argument('--aggregator_type',
+                        type=str,
+                        default='mean',
                         help='Aggregator used if gnn_type is set to graphsage')
-    parser.add_argument('--num_heads', type=int, default=1,
+    parser.add_argument('--num_heads',
+                        type=int,
+                        default=1,
                         help='Indicates the number of attention heads if gnn_type is gat')
+    parser.add_argument('--fft_graph',
+                        type=bool,
+                        default=False,
+                        help='Create the graph using the provided fft data')
     args = parser.parse_args()
 
     # Common arguments
     input_path = args.input_path
+    input_fft_path = args.input_fft_path
     hidden_dim = args.hidden_dim
     input_dim = args.input_dim
     lr = args.learning_rate
@@ -77,6 +99,7 @@ def main():
     batch_size = args.batch_size
     load_checkpoint = args.load_checkpoint
     gnn_type = args.gnn_type
+    fft_graph = args.fft_graph
 
     # KNN arguments
     knn_algorithm = args.knn_algorithm
@@ -97,8 +120,14 @@ def main():
     use_cuda = torch.cuda.is_available()
 
     # Load the dataset
-    dataset = ProstateCancerDataset(input_path, train=True, k=k, weighted=weighted, n_jobs=n_jobs,
-                                    knn_algorithm=knn_algorithm)
+    dataset = ProstateCancerDataset(mat_file_path=input_path,
+                                    train=True,
+                                    k=k,
+                                    weighted=weighted,
+                                    n_jobs=n_jobs,
+                                    knn_algorithm=knn_algorithm,
+                                    fft_graph=fft_graph,
+                                    fft_mat_file_path=input_fft_path)
     dataset_len = len(dataset)
     print("dataset has {} data points".format(dataset_len))
 

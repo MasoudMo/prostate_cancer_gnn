@@ -118,23 +118,40 @@ class ProstateCancerDataset(Dataset):
     Dataset class for the prostate cancer dataset
     """
 
-    def __init__(self, mat_file_path, train=True, weighted=False, k=10, n_jobs=1, knn_algorithm='auto'):
+    def __init__(self, mat_file_path,
+                 fft_mat_file_path=None,
+                 train=True,
+                 weighted=False,
+                 k=10,
+                 n_jobs=1,
+                 knn_algorithm='auto',
+                 fft_graph=False):
         """
         Constructor for the prostate cancer dataset class
         Parameters:
-            mat_file_path (str): Path to the .mat file
+            mat_file_path (str): Path to the time domain .mat file
+            fft_mat_file_path (str): Path to the frequency domain .mat file
             train (bool): Indicates whether train or test data is loaded
             weighted (bool): Indicates whether created graph is weighted or not
             k (int): Number of neighbours to use for the K-nearest neighbour algorithm
             n_jobs (int): Number of jobs to deploy for graph creation
             knn_algorithm (str): Choose between auto, ball_tree, kd_tree or brute for the graph creation algorithm
+            fft_graph (bool): Indicates whether time or freq domain data is used for graph creation
         """
 
         # Load the .mat file
         self.prostate_cancer_mat_data = h5py.File(mat_file_path, 'r')
 
+        self.fft_graph = fft_graph
+
+        if fft_graph:
+            self.prostate_cancer_fft_mat_data = h5py.File(fft_mat_file_path, 'r')
+
         # Load either the test or train data
         self.mat_data = self.prostate_cancer_mat_data['data_train' if train else 'data_test']
+
+        if fft_graph:
+            self.mat_fft_data = self.prostate_cancer_fft_mat_data['data_train' if train else 'data_test']
 
         # Find the number of available cells
         self.num_cells = self.mat_data.shape[0]
@@ -165,11 +182,20 @@ class ProstateCancerDataset(Dataset):
         data = np.array(self.prostate_cancer_mat_data[self.mat_data[idx, 0]][()].transpose(), dtype=np.float32)
 
         # Create the graph using knn
-        graph = create_knn_adj_mat(data,
-                                   k=self.k,
-                                   weighted=self.weighted,
-                                   n_jobs=self.n_jobs,
-                                   algorithm=self.knn_algorithm)
+        if self.fft_graph:
+            freq_data = np.array(self.prostate_cancer_mat_data[self.mat_data[idx*2+1, 0]][()].transpose())
+            freq_data = np.sqrt(np.power(freq_data['real'], 2) + np.power(freq_data['imag'], 2), dtype=np.float32)
+            graph = create_knn_adj_mat(freq_data,
+                                       k=self.k,
+                                       weighted=self.weighted,
+                                       n_jobs=self.n_jobs,
+                                       algorithm=self.knn_algorithm)
+        else:
+            graph = create_knn_adj_mat(data,
+                                       k=self.k,
+                                       weighted=self.weighted,
+                                       n_jobs=self.n_jobs,
+                                       algorithm=self.knn_algorithm)
 
         # Create a dgl graph from coo_matrix
         g = dgl.DGLGraph()
