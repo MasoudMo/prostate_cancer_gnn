@@ -11,6 +11,7 @@ from sources.model import GraphSageBinaryClassifier
 import argparse
 from math import floor
 from sklearn.metrics import roc_auc_score
+from datetime import datetime
 
 
 def save_checkpoint(epoch, model_state_dict, optimizer_state_dict, loss, path):
@@ -83,6 +84,10 @@ def main():
                         type=bool,
                         default=False,
                         help='Create the graph using the provided fft data')
+    parser.add_argument('--threshold',
+                        type=float,
+                        default=None,
+                        help='Threshold value used in graph creation')
     args = parser.parse_args()
 
     # Common arguments
@@ -105,6 +110,7 @@ def main():
     knn_algorithm = args.knn_algorithm
     n_jobs = args.n_jobs
     k = args.k
+    threshold = args.threshold
 
     # Gat/Graphsage-specific argument
     feat_drop = args.feat_drop
@@ -127,7 +133,8 @@ def main():
                                     n_jobs=n_jobs,
                                     knn_algorithm=knn_algorithm,
                                     fft_graph=fft_graph,
-                                    fft_mat_file_path=input_fft_path)
+                                    fft_mat_file_path=input_fft_path,
+                                    threshold=threshold)
     dataset_len = len(dataset)
     print("dataset has {} data points".format(dataset_len))
 
@@ -183,6 +190,8 @@ def main():
 
     for epoch in range(starting_epoch, epochs):
 
+        t_start = datetime.now()
+
         # Put model in train model
         model.train()
 
@@ -214,6 +223,9 @@ def main():
         epoch_loss /= training_set_len
         print('Epoch {}, loss {:.4f}'.format(epoch, epoch_loss))
 
+        t_end = datetime.now()
+        print("it took {} for the epoch to finish".format(t_end-t_start))
+
         # Save model checkpoint
         save_checkpoint(epoch, model.state_dict(), optimizer.state_dict(), loss, model_param_path)
 
@@ -228,12 +240,12 @@ def main():
                 if use_cuda:
                     label = label.cuda()
 
-                y_true.append(label)
+                y_true.append(label.detach().item())
 
                 # Predict labels
                 prediction = model(bg)
 
-                y_score.append(prediction)
+                y_score.append(prediction.detach().item())
 
                 # Compute loss
                 loss = loss_func(prediction[0], label)

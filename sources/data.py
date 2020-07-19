@@ -1,4 +1,5 @@
 from sklearn.neighbors import NearestNeighbors
+from sklearn.preprocessing import normalize
 import numpy as np
 import scipy.sparse as sp
 import networkx as nx
@@ -9,7 +10,7 @@ import torch
 import dgl
 
 
-def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto'):
+def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto', threshold=None):
     """
     Create a directed normalized adjacency matrix from input nodes based on k-nearest neighbours
     Parameters:
@@ -18,6 +19,7 @@ def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto
         weighted (bool): set to True for weighted adjacency matrix (based on Euclidean distance)
         n_jobs (int): number of jobs to deploy
         algorithm (str): Choose between auto, ball_tree, kd_tree or brute
+        threshold (float): Cutoff value for the Euclidean distance
     Returns:
         (coo matrix): adjacency matrix as a sparse coo matrix
     """
@@ -32,15 +34,19 @@ def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto
                                                                          k,
                                                                          mode='distance')).toarray())
 
-        # Take reciprocal of non-zero elements to associate lower weight to higher distances
+        if threshold:
+            indices_to_zero = adj_mat_weighted > threshold
+            adj_mat_weighted[indices_to_zero] = 0
 
+        # Take reciprocal of non-zero elements to associate lower weight to higher distances
         non_zero_indices = np.nonzero(adj_mat_weighted)
         adj_mat_weighted[non_zero_indices] = 1 / adj_mat_weighted[non_zero_indices]
 
         # Normalize rows
-        adj_mat_weighted = adj_mat_weighted / adj_mat_weighted.sum(1)[:, np.newaxis]
+        coo_matrix = sp.coo_matrix(adj_mat_weighted)
+        normalized_coo_matrix = normalize(coo_matrix)
 
-        return sp.coo_matrix(adj_mat_weighted)
+        return normalized_coo_matrix
 
     # Obtain the binary adjacency matrix
     adj_mat_connectivity = np.array(sp.coo_matrix(neigh.kneighbors_graph(features,
@@ -125,7 +131,8 @@ class ProstateCancerDataset(Dataset):
                  k=10,
                  n_jobs=1,
                  knn_algorithm='auto',
-                 fft_graph=False):
+                 fft_graph=False,
+                 threshold=None):
         """
         Constructor for the prostate cancer dataset class
         Parameters:
@@ -137,6 +144,8 @@ class ProstateCancerDataset(Dataset):
             n_jobs (int): Number of jobs to deploy for graph creation
             knn_algorithm (str): Choose between auto, ball_tree, kd_tree or brute for the graph creation algorithm
             fft_graph (bool): Indicates whether time or freq domain data is used for graph creation
+            threshold (float): Value indicating the cutoff value for the Euclidean distance in graph creation (Only
+                               valid when weighted is set to True)
         """
 
         # Load the .mat file
@@ -164,6 +173,7 @@ class ProstateCancerDataset(Dataset):
         self.k = k
         self.n_jobs = n_jobs
         self.knn_algorithm = knn_algorithm
+        self.threshold = threshold
 
     def __getitem__(self, idx):
         """
@@ -183,19 +193,21 @@ class ProstateCancerDataset(Dataset):
 
         # Create the graph using knn
         if self.fft_graph:
-            freq_data = np.array(self.prostate_cancer_mat_data[self.mat_data[idx*2+1, 0]][()].transpose())
+            freq_data = np.array(self.prostate_cancer_fft_mat_data[self.mat_fft_data[idx*2+1, 0]][()].transpose())
             freq_data = np.sqrt(np.power(freq_data['real'], 2) + np.power(freq_data['imag'], 2), dtype=np.float32)
             graph = create_knn_adj_mat(freq_data,
                                        k=self.k,
                                        weighted=self.weighted,
                                        n_jobs=self.n_jobs,
-                                       algorithm=self.knn_algorithm)
+                                       algorithm=self.knn_algorithm,
+                                       threshold=self.threshold)
         else:
             graph = create_knn_adj_mat(data,
                                        k=self.k,
                                        weighted=self.weighted,
                                        n_jobs=self.n_jobs,
-                                       algorithm=self.knn_algorithm)
+                                       algorithm=self.knn_algorithm,
+                                       threshold=self.threshold)
 
         # Create a dgl graph from coo_matrix
         g = dgl.DGLGraph()

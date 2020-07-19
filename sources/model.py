@@ -65,6 +65,8 @@ class GraphAttConvBinaryClassifier(nn.Module):
             in_dim (int): Dimension of features for each node
             hidden_dim (int): Dimension of hidden embeddings
             num_heads (int): Number of attention heads used
+            feat_drop (float): Indicates the dropout rate for features
+            attn_drop (float): Indicates the dropout rate for the attention mechanism
             use_cuda (bool): Indicates whether GPU should be utilized or not
         """
         super(GraphAttConvBinaryClassifier, self).__init__()
@@ -114,6 +116,7 @@ class GraphSageBinaryClassifier(nn.Module):
             in_dim (int): dimension of features for each node
             hidden_dim (int): dimension of hidden embeddings
             aggregator_type (str): One of mean, lstm, gcn or pool
+            feat_drop (float): Indicates the dropout rate for the features
             use_cuda (bool): Indicates whether GPU should be utilized or not
         """
         super(GraphSageBinaryClassifier, self).__init__()
