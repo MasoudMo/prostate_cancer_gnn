@@ -8,6 +8,7 @@ from torch.utils.data import Dataset
 import h5py
 import torch
 import dgl
+from sklearn.decomposition import PCA
 
 
 def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto', threshold=None):
@@ -59,11 +60,13 @@ def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto
     return sp.coo_matrix(adj_mat_connectivity)
 
 
-def draw_graph(adj_mat, weighted=False, directed=False):
+def draw_graph(adj_mat, label, idx, weighted=False, directed=False):
     """
     Plots the graph for a weighted adjacency matrix
     Parameters:
         adj_mat (sparse coo matrix): Weighted adjacency matrix
+        label (bool): Indicates the label for the graph to be drawn (used in saved file name)
+        idx (int): Indicates the index for the graph to be drawn (used in saved file name)
         weighted (bool): Indicates whether the graph edges are weighted or not
         directed (bool): Indicates whether the graph is directed or not
     """
@@ -93,8 +96,9 @@ def draw_graph(adj_mat, weighted=False, directed=False):
                                arrowstyle='-|>')
 
         # Show the graph
-        plt.title('Weighted Graph with Spring Layout')
         plt.show()
+        plt.title('Weighted Graph with Spring Layout')
+        plt.savefig("./graph_"+str(idx)+"_label_"+str(label)+".png")
 
         return
 
@@ -129,10 +133,10 @@ class ProstateCancerDataset(Dataset):
                  train=True,
                  weighted=False,
                  k=10,
-                 n_jobs=1,
-                 knn_algorithm='auto',
-                 fft_graph=False,
-                 threshold=None):
+                 knn_n_jobs=1,
+                 threshold=None,
+                 perform_pca=False,
+                 num_pca_components=None):
         """
         Constructor for the prostate cancer dataset class
         Parameters:
@@ -141,39 +145,43 @@ class ProstateCancerDataset(Dataset):
             train (bool): Indicates whether train or test data is loaded
             weighted (bool): Indicates whether created graph is weighted or not
             k (int): Number of neighbours to use for the K-nearest neighbour algorithm
-            n_jobs (int): Number of jobs to deploy for graph creation
-            knn_algorithm (str): Choose between auto, ball_tree, kd_tree or brute for the graph creation algorithm
-            fft_graph (bool): Indicates whether time or freq domain data is used for graph creation
+            knn_n_jobs (int): Number of jobs to deploy for graph creation
             threshold (float): Value indicating the cutoff value for the Euclidean distance in graph creation (Only
                                valid when weighted is set to True)
+            perform_pca (bool): Indicates whether PCA dimension reduction is performed on data or not
+            num_pca_components (int): Indicates the number of components for PCA
         """
 
         # Load the .mat file
         self.prostate_cancer_mat_data = h5py.File(mat_file_path, 'r')
 
-        self.fft_graph = fft_graph
-
-        if fft_graph:
-            self.prostate_cancer_fft_mat_data = h5py.File(fft_mat_file_path, 'r')
-
         # Load either the test or train data
         self.mat_data = self.prostate_cancer_mat_data['data_train' if train else 'data_test']
 
-        if fft_graph:
+        self.use_fft_data = False
+
+        # Use frequency domain data if provided
+        if fft_mat_file_path:
+            self.use_fft_data = True
+            self.prostate_cancer_fft_mat_data = h5py.File(fft_mat_file_path, 'r')
             self.mat_fft_data = self.prostate_cancer_fft_mat_data['data_train' if train else 'data_test']
 
-        # Find the number of available cells
-        self.num_cells = self.mat_data.shape[0]
+        # Find the number of available cores
+        self.num_cores = self.mat_data.shape[0]
 
-        # Obtain the labels for the cells
+        # Obtain the labels for the cores
         self.labels = np.array(self.prostate_cancer_mat_data['label_train' if train else 'label_test'], dtype=np.int)
 
         # Parameters used in graph creation
         self.weighted = weighted
         self.k = k
-        self.n_jobs = n_jobs
-        self.knn_algorithm = knn_algorithm
+        self.knn_n_jobs = knn_n_jobs
         self.threshold = threshold
+
+        # Other variables
+        self.train = train
+        self.perform_pca = perform_pca
+        self.num_pca_components = num_pca_components
 
     def __getitem__(self, idx):
         """
@@ -181,56 +189,77 @@ class ProstateCancerDataset(Dataset):
         Parameters:
             idx (int): index of data point to retrieve
         Returns:
-            (numpy array): Numpy array containing the signals for a single cell
-            (int): Label indicating whether the cell is cancerous or healthy
+            (numpy array): Numpy array containing the signals for a single core
+            (int): Label indicating whether the core is cancerous or healthy
         """
 
-        # Obtain the label for the specified cell
+        # Obtain the label for the specified core
         label = self.labels[idx][0]
 
-        # Obtain the cell signals and change them into a numpy array
+        # Obtain the core signals and change them into a numpy array
         data = np.array(self.prostate_cancer_mat_data[self.mat_data[idx, 0]][()].transpose(), dtype=np.float32)
 
-        # Create the graph using knn
-        if self.fft_graph:
+        # Perform PCA on time domain data (To be used as node features)
+        if self.perform_pca:
+            pca = PCA(n_components=self.num_pca_components)
+            pca.fit(data)
+            reduced_data = pca.transform(data)
+
+        # Create the graph using the FFT data
+        if self.use_fft_data:
+            # Use the second half of each FFT signal
             freq_data = np.array(self.prostate_cancer_fft_mat_data[self.mat_fft_data[idx*2+1, 0]][()].transpose())
             freq_data = np.sqrt(np.power(freq_data['real'], 2) + np.power(freq_data['imag'], 2), dtype=np.float32)
-            graph = create_knn_adj_mat(freq_data,
-                                       k=self.k,
-                                       weighted=self.weighted,
-                                       n_jobs=self.n_jobs,
-                                       algorithm=self.knn_algorithm,
-                                       threshold=self.threshold)
+
+            # Perform PCA on FFT data
+            if self.perform_pca:
+                pca = PCA(n_components=self.num_pca_components)
+                pca.fit(freq_data)
+                reduced_freq_data = pca.transform(freq_data)
+
+                # Create the graph using reduced FFT data
+                graph = create_knn_adj_mat(reduced_freq_data,
+                                           k=self.k,
+                                           weighted=self.weighted,
+                                           n_jobs=self.knn_n_jobs,
+                                           threshold=self.threshold)
+            else:
+                # Create the graph using FFT data
+                graph = create_knn_adj_mat(freq_data,
+                                           k=self.k,
+                                           weighted=self.weighted,
+                                           n_jobs=self.knn_n_jobs,
+                                           threshold=self.threshold)
         else:
-            graph = create_knn_adj_mat(data,
-                                       k=self.k,
-                                       weighted=self.weighted,
-                                       n_jobs=self.n_jobs,
-                                       algorithm=self.knn_algorithm,
-                                       threshold=self.threshold)
+            if self.perform_pca:
+                # noinspection PyUnboundLocalVariable
+                graph = create_knn_adj_mat(reduced_data,
+                                           k=self.k,
+                                           weighted=self.weighted,
+                                           n_jobs=self.knn_n_jobs,
+                                           threshold=self.threshold)
+            else:
+                graph = create_knn_adj_mat(data,
+                                           k=self.k,
+                                           weighted=self.weighted,
+                                           n_jobs=self.knn_n_jobs,
+                                           threshold=self.threshold)
 
         # Create a dgl graph from coo_matrix
         g = dgl.DGLGraph()
         g.from_scipy_sparse_matrix(graph)
 
-        # Put RF signals as node features
-        g.nodes[:].data['x'] = data
+        # Put time domain signals as node features
+        if self.perform_pca:
+            g.nodes[:].data['x'] = reduced_data
+        else:
+            g.nodes[:].data['x'] = data
 
         return g, label
 
     def __len__(self):
         """
         Returns:
-            (int): Indicates the number of available cells
+            (int): Indicates the number of available cores
         """
-        return self.num_cells
-
-
-if __name__ == '__main__':
-
-    prostate_cancer_mat_data = h5py.File('../data/BK_RF_P1_90_MICCAI_33.mat', 'r')
-    mat_data = prostate_cancer_mat_data['data_train']
-    x = np.array(prostate_cancer_mat_data[mat_data[0, 0]][()].transpose())
-    x = create_knn_adj_mat(x, weighted=True, k=10, )
-    draw_graph(x, weighted=True, directed=True)
-    print('hello')
+        return self.num_cores
