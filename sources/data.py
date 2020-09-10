@@ -11,7 +11,7 @@ import dgl
 from sklearn.decomposition import PCA
 
 
-def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto', threshold=None):
+def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto', threshold=None, use_gpu=False):
     """
     Create a directed normalized adjacency matrix from input nodes based on k-nearest neighbours
     Parameters:
@@ -21,6 +21,7 @@ def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto
         n_jobs (int): number of jobs to deploy
         algorithm (str): Choose between auto, ball_tree, kd_tree or brute
         threshold (float): Cutoff value for the Euclidean distance
+        use_gpu (bool): Indicates whether GPU is to be used for the KNN algorithm
     Returns:
         (coo matrix): adjacency matrix as a sparse coo matrix
     """
@@ -136,7 +137,14 @@ class ProstateCancerDataset(Dataset):
                  knn_n_jobs=1,
                  threshold=None,
                  perform_pca=False,
-                 num_pca_components=None):
+                 num_pca_components=None,
+                 train_data_string='data_train',
+                 test_data_string='data_test',
+                 train_fft_data_string='data_train',
+                 test_fft_data_string='data_test',
+                 train_data_label_string='label_train',
+                 test_data_label_string='label_test'
+                 ):
         """
         Constructor for the prostate cancer dataset class
         Parameters:
@@ -150,13 +158,19 @@ class ProstateCancerDataset(Dataset):
                                valid when weighted is set to True)
             perform_pca (bool): Indicates whether PCA dimension reduction is performed on data or not
             num_pca_components (int): Indicates the number of components for PCA
+            train_data_string (str): If train data string is anything other than data_train, specify it
+            test_data_string (str): If test data string is anything other than data_test, specify it
+            train_fft_data_string (str): If train data string is anything other than data_train, specify it
+            test_fft_data_string (str): If test data string is anything other than data_test, specify it
+            train_data_label_string (str): If train data string is anything other than data_train, specify it
+            test_data_label_string (str): If test data string is anything other than data_test, specify it
         """
 
         # Load the .mat file
         self.prostate_cancer_mat_data = h5py.File(mat_file_path, 'r')
 
         # Load either the test or train data
-        self.mat_data = self.prostate_cancer_mat_data['data_train' if train else 'data_test']
+        self.mat_data = self.prostate_cancer_mat_data[train_data_string if train else test_data_string]
 
         self.use_fft_data = False
 
@@ -164,13 +178,15 @@ class ProstateCancerDataset(Dataset):
         if fft_mat_file_path:
             self.use_fft_data = True
             self.prostate_cancer_fft_mat_data = h5py.File(fft_mat_file_path, 'r')
-            self.mat_fft_data = self.prostate_cancer_fft_mat_data['data_train' if train else 'data_test']
+            self.mat_fft_data = self.prostate_cancer_fft_mat_data[
+                train_fft_data_string if train else test_fft_data_string]
 
         # Find the number of available cores
         self.num_cores = self.mat_data.shape[0]
 
         # Obtain the labels for the cores
-        self.labels = np.array(self.prostate_cancer_mat_data['label_train' if train else 'label_test'], dtype=np.int)
+        self.labels = np.array(self.prostate_cancer_mat_data[
+                                   train_data_label_string if train else test_data_label_string], dtype=np.int)
 
         # Parameters used in graph creation
         self.weighted = weighted

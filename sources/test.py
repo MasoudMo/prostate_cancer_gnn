@@ -107,7 +107,10 @@ def main():
                                      knn_n_jobs=knn_n_jobs,
                                      threshold=threshold,
                                      perform_pca=perform_pca,
-                                     num_pca_components=input_dim)
+                                     num_pca_components=input_dim,
+                                     test_data_string="data",
+                                     test_fft_data_string="FFT_train",
+                                     test_data_label_string="label")
 
     dataset_len = len(test_set)
     print("Test dataset has {} points".format(dataset_len))

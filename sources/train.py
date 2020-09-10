@@ -156,11 +156,11 @@ def main():
                                           num_pca_components=input_dim)
 
     dataset_train_len = len(dataset_train)
-    print("training dataset has {} samples".format(dataset_train_len))
+    print("Training dataset has {} samples".format(dataset_train_len))
 
     # Load the test dataset if provided
     calculate_test_accuracy = False
-    if mat_file_path:
+    if test_mat_file_path:
         calculate_test_accuracy = True
         dataset_test = ProstateCancerDataset(mat_file_path=test_mat_file_path,
                                              train=False,
@@ -170,7 +170,10 @@ def main():
                                              fft_mat_file_path=test_fft_mat_file_path,
                                              threshold=threshold,
                                              perform_pca=perform_pca,
-                                             num_pca_components=input_dim)
+                                             num_pca_components=input_dim,
+                                             test_data_string="data",
+                                             test_fft_data_string="FFT_train",
+                                             test_data_label_string="label")
 
         test_set_len = len(dataset_test)
         test_data_loader = DataLoader(dataset_test, shuffle=True, collate_fn=collate)
@@ -228,15 +231,17 @@ def main():
         model = model.cuda()
 
     # Loss and accuracy variables
-    max_val_acc = 0
-    val_losses = []
     train_losses = []
-    val_accs = []
     loss = 0
 
+    if validation_set_len is not 0:
+        max_val_acc = 0
+        val_accs = []
+        val_losses = []
+
     if calculate_test_accuracy:
-        test_accs = []
         max_test_acc = 0
+        test_accs = []
         test_losses = []
 
     for epoch in range(starting_epoch, epochs):
@@ -291,6 +296,8 @@ def main():
         # Find validation loss
         if validation_set_len is not 0:
 
+            t_start = datetime.now()
+
             with torch.no_grad():
                 y_true = []
                 y_score = []
@@ -317,10 +324,16 @@ def main():
                 # Compute and print validation loss
                 validation_loss /= validation_set_len
                 print('Validation loss {:.4f}'.format(validation_loss))
+                # noinspection PyUnboundLocalVariable
                 val_losses.append(validation_loss)
                 acc = roc_auc_score(y_true, y_score)
                 print("Validation accuracy {:.4f}".format(acc))
+                # noinspection PyUnboundLocalVariable
                 val_accs.append(acc)
+
+                # Print elapsed time
+                t_end = datetime.now()
+                print("it took {} for the validation set.".format(t_end - t_start))
 
                 # Save to history if needed
                 if history_path:
@@ -341,6 +354,9 @@ def main():
                     save_checkpoint(epoch, model.state_dict(), optimizer.state_dict(), loss, best_model_path)
 
         if calculate_test_accuracy:
+
+            t_start = datetime.now()
+
             y_true = []
             y_score = []
             test_loss = 0
@@ -363,34 +379,39 @@ def main():
                 # Accumulate validation loss
                 test_loss += loss.detach().item()
 
-                # Compute and print validation loss
-                # noinspection PyUnboundLocalVariable
-                test_loss /= test_set_len
-                print('Test loss {:.4f}'.format(test_loss))
-                # noinspection PyUnboundLocalVariable
-                test_losses.append(test_loss)
-                acc = roc_auc_score(y_true, y_score)
-                print("Test accuracy {:.4f}".format(acc))
-                # noinspection PyUnboundLocalVariable
-                test_accs.append(acc)
+            # Compute and print validation loss
+            # noinspection PyUnboundLocalVariable
+            test_loss /= test_set_len
+            print('Test loss {:.4f}'.format(test_loss))
+            # noinspection PyUnboundLocalVariable
+            test_losses.append(test_loss)
+            acc = roc_auc_score(y_true, y_score)
+            print("Test accuracy {:.4f}".format(acc))
+            # noinspection PyUnboundLocalVariable
+            test_accs.append(acc)
 
-                # Save to history if needed
-                if history_path:
-                    f = open(history_path + "test_losses.txt", "w")
-                    for ele in test_losses:
-                        f.write(str(ele) + "\n")
-                    f.close()
+            # Print elapsed time
+            t_end = datetime.now()
+            print("it took {} for the validation set.".format(t_end - t_start))
 
-                    f = open(history_path + "test_accs.txt", "w")
-                    for ele in test_accs:
-                        f.write(str(ele) + "\n")
-                    f.close()
+            # Save to history if needed
+            if history_path:
+                f = open(history_path + "test_losses.txt", "w")
+                for ele in test_losses:
+                    f.write(str(ele) + "\n")
+                f.close()
 
-                if acc > max_test_acc:
-                    max_test_acc = acc
-                    # Save model checkpoint if validation accuracy has increased
-                    print("Test accuracy increased. Saving model to {}".format("test"+best_model_path))
-                    save_checkpoint(epoch, model.state_dict(), optimizer.state_dict(), loss, "test"+best_model_path)
+                f = open(history_path + "test_accs.txt", "w")
+                for ele in test_accs:
+                    f.write(str(ele) + "\n")
+                f.close()
+
+            # noinspection PyUnboundLocalVariable
+            if acc > max_test_acc:
+                max_test_acc = acc
+                # Save model checkpoint if validation accuracy has increased
+                print("Test accuracy increased. Saving model to {}".format(best_model_path))
+                save_checkpoint(epoch, model.state_dict(), optimizer.state_dict(), loss, best_model_path)
 
 
 if __name__ == "__main__":
