@@ -36,6 +36,10 @@ def main():
                         type=int,
                         default=1,
                         help='Indicates the number jobs to deploy for graph creation')
+    parser.add_argument('--cuda_knn',
+                        type=bool,
+                        default=False,
+                        help='Indicates whether the graph created using GPU')
     parser.add_argument('--weighted',
                         type=bool,
                         default=False,
@@ -70,6 +74,7 @@ def main():
     knn_n_jobs = args.knn_n_jobs
     k = args.k
     threshold = args.threshold
+    cuda_knn = args.cuda_knn
 
     # Check if cuda is available
     use_cuda = torch.cuda.is_available()
@@ -110,7 +115,8 @@ def main():
                                      num_pca_components=input_dim,
                                      test_data_string="data",
                                      test_fft_data_string="FFT_train",
-                                     test_data_label_string="label")
+                                     test_data_label_string="label",
+                                     cuda_knn=cuda_knn)
 
     dataset_len = len(test_set)
     print("Test dataset has {} points".format(dataset_len))

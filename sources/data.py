@@ -9,6 +9,10 @@ import h5py
 import torch
 import dgl
 from sklearn.decomposition import PCA
+try:
+    import knn
+except ImportError:
+    pass
 
 
 def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto', threshold=None, use_gpu=False):
@@ -18,7 +22,7 @@ def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto
         features (numpy array of node features): array of size N*M (N nodes, M feature size)
         k (int): number of neighbours to find
         weighted (bool): set to True for weighted adjacency matrix (based on Euclidean distance)
-        n_jobs (int): number of jobs to deploy
+        n_jobs (int): number of jobs to deploy if GPU is not used
         algorithm (str): Choose between auto, ball_tree, kd_tree or brute
         threshold (float): Cutoff value for the Euclidean distance
         use_gpu (bool): Indicates whether GPU is to be used for the KNN algorithm
@@ -26,34 +30,85 @@ def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto
         (coo matrix): adjacency matrix as a sparse coo matrix
     """
 
-    # initialize and fit nearest neighbour algorithm
-    neigh = NearestNeighbors(n_neighbors=k, n_jobs=n_jobs, algorithm=algorithm)
-    neigh.fit(features)
+    if use_gpu:
 
-    if weighted:
-        # Obtain matrix with distance of k-nearest points
-        adj_mat_weighted = np.array(sp.coo_matrix(neigh.kneighbors_graph(features,
-                                                                         k,
-                                                                         mode='distance')).toarray())
+        # Create zero matrix as the initial adjacency matrix
+        adj_mat_connectivity = np.zeros((features.shape[0], features.shape[0]))
 
-        if threshold:
-            indices_to_zero = adj_mat_weighted > threshold
-            adj_mat_weighted[indices_to_zero] = 0
+        # Transpose features matrix as Cuda KNN requires to do so
+        transposed_features = features.transpose()
 
-        # Take reciprocal of non-zero elements to associate lower weight to higher distances
-        non_zero_indices = np.nonzero(adj_mat_weighted)
-        adj_mat_weighted[non_zero_indices] = 1 / adj_mat_weighted[non_zero_indices]
+        # Find the k nearest neighbours and their distance
+        dist, idx = knn.knn(transposed_features.reshape(features.shape[1], -1),
+                            transposed_features.reshape(features.shape[1], -1),
+                            k)
 
-        # Normalize rows
-        coo_matrix = sp.coo_matrix(adj_mat_weighted)
-        normalized_coo_matrix = normalize(coo_matrix)
+        # Clean up the indices and distances
+        idx = idx - 1
+        idx = idx.transpose()
+        dist = dist.transpose().flatten()
 
-        return normalized_coo_matrix
+        # Create tuples of indices where an edge exists
+        rows = np.repeat(np.arange(features.shape[0]), k)
+        columns = idx.flatten()
+        present_edge_idx = tuple(np.stack((rows, columns)))
 
-    # Obtain the binary adjacency matrix
-    adj_mat_connectivity = np.array(sp.coo_matrix(neigh.kneighbors_graph(features,
-                                                                         k,
-                                                                         mode='connectivity')).toarray())
+        if weighted:
+
+            # Remove edges where the distance is higher than the threshold
+            if threshold:
+                indices_to_remove = dist > threshold
+                indices_to_remove = np.where(indices_to_remove)
+                present_edge_idx = tuple(np.delete(present_edge_idx, indices_to_remove, 1))
+                dist = np.delete(dist, indices_to_remove[0], 0)
+
+            # Fill in the adjacency matrix with node distances
+            adj_mat_connectivity[present_edge_idx] = dist
+
+            # Take reciprocal of non-zero elements to associate lower weight to higher distances
+            non_zero_indices = np.nonzero(adj_mat_connectivity)
+            adj_mat_connectivity[non_zero_indices] = 1 / adj_mat_connectivity[non_zero_indices]
+
+            # Normalize rows
+            coo_matrix = sp.coo_matrix(adj_mat_connectivity)
+            normalized_coo_matrix = normalize(coo_matrix)
+
+            return normalized_coo_matrix
+
+        else:
+            # Create the binary adjacency matrix
+            adj_mat_connectivity[present_edge_idx] = 1
+
+    else:
+
+        # initialize and fit nearest neighbour algorithm
+        neigh = NearestNeighbors(n_neighbors=k, n_jobs=n_jobs, algorithm=algorithm)
+        neigh.fit(features)
+
+        if weighted:
+            # Obtain matrix with distance of k-nearest points
+            adj_mat_weighted = np.array(sp.coo_matrix(neigh.kneighbors_graph(features,
+                                                                             k,
+                                                                             mode='distance')).toarray())
+
+            if threshold:
+                indices_to_zero = adj_mat_weighted > threshold
+                adj_mat_weighted[indices_to_zero] = 0
+
+            # Take reciprocal of non-zero elements to associate lower weight to higher distances
+            non_zero_indices = np.nonzero(adj_mat_weighted)
+            adj_mat_weighted[non_zero_indices] = 1 / adj_mat_weighted[non_zero_indices]
+
+            # Normalize rows
+            coo_matrix = sp.coo_matrix(adj_mat_weighted)
+            normalized_coo_matrix = normalize(coo_matrix)
+
+            return normalized_coo_matrix
+
+        # Obtain the binary adjacency matrix
+        adj_mat_connectivity = np.array(sp.coo_matrix(neigh.kneighbors_graph(features,
+                                                                             k,
+                                                                             mode='connectivity')).toarray())
 
     # Remove self-connections
     adj_mat_connectivity -= np.eye(features.shape[0])
@@ -135,6 +190,7 @@ class ProstateCancerDataset(Dataset):
                  weighted=False,
                  k=10,
                  knn_n_jobs=1,
+                 cuda_knn=False,
                  threshold=None,
                  perform_pca=False,
                  num_pca_components=None,
@@ -153,7 +209,8 @@ class ProstateCancerDataset(Dataset):
             train (bool): Indicates whether train or test data is loaded
             weighted (bool): Indicates whether created graph is weighted or not
             k (int): Number of neighbours to use for the K-nearest neighbour algorithm
-            knn_n_jobs (int): Number of jobs to deploy for graph creation
+            knn_n_jobs (int): Number of jobs to deploy for graph creation in CPU mode
+            cuda_knn (bool): Indicate whether GPU knn is used or not
             threshold (float): Value indicating the cutoff value for the Euclidean distance in graph creation (Only
                                valid when weighted is set to True)
             perform_pca (bool): Indicates whether PCA dimension reduction is performed on data or not
@@ -193,6 +250,7 @@ class ProstateCancerDataset(Dataset):
         self.k = k
         self.knn_n_jobs = knn_n_jobs
         self.threshold = threshold
+        self.cuda_knn = cuda_knn
 
         # Other variables
         self.train = train
@@ -238,14 +296,16 @@ class ProstateCancerDataset(Dataset):
                                            k=self.k,
                                            weighted=self.weighted,
                                            n_jobs=self.knn_n_jobs,
-                                           threshold=self.threshold)
+                                           threshold=self.threshold,
+                                           use_gpu=self.cuda_knn)
             else:
                 # Create the graph using FFT data
                 graph = create_knn_adj_mat(freq_data,
                                            k=self.k,
                                            weighted=self.weighted,
                                            n_jobs=self.knn_n_jobs,
-                                           threshold=self.threshold)
+                                           threshold=self.threshold,
+                                           use_gpu=self.cuda_knn)
         else:
             if self.perform_pca:
                 # noinspection PyUnboundLocalVariable
@@ -253,13 +313,15 @@ class ProstateCancerDataset(Dataset):
                                            k=self.k,
                                            weighted=self.weighted,
                                            n_jobs=self.knn_n_jobs,
-                                           threshold=self.threshold)
+                                           threshold=self.threshold,
+                                           use_gpu=self.cuda_knn)
             else:
                 graph = create_knn_adj_mat(data,
                                            k=self.k,
                                            weighted=self.weighted,
                                            n_jobs=self.knn_n_jobs,
-                                           threshold=self.threshold)
+                                           threshold=self.threshold,
+                                           use_gpu=self.cuda_knn)
 
         # Create a dgl graph from coo_matrix
         g = dgl.DGLGraph()

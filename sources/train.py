@@ -85,6 +85,10 @@ def main():
                         type=int,
                         default=1,
                         help='Indicates the number jobs to deploy for graph creation')
+    parser.add_argument('--cuda_knn',
+                        type=bool,
+                        default=False,
+                        help='Indicates whether the graph created using GPU')
     parser.add_argument('--best_model_path',
                         type=str,
                         default='../model/model.pt',
@@ -140,6 +144,7 @@ def main():
     perform_pca = args.perform_pca
     feat_drop = args.feat_drop
     attn_drop = args.attn_drop
+    cuda_knn = args.cuda_knn
 
     # Check whether cuda is available or not
     use_cuda = torch.cuda.is_available()
@@ -153,7 +158,8 @@ def main():
                                           fft_mat_file_path=fft_mat_file_path,
                                           threshold=threshold,
                                           perform_pca=perform_pca,
-                                          num_pca_components=input_dim)
+                                          num_pca_components=input_dim,
+                                          cuda_knn=cuda_knn)
 
     dataset_train_len = len(dataset_train)
     print("Training dataset has {} samples".format(dataset_train_len))
@@ -173,7 +179,8 @@ def main():
                                              num_pca_components=input_dim,
                                              test_data_string="data",
                                              test_fft_data_string="FFT_train",
-                                             test_data_label_string="label")
+                                             test_data_label_string="label",
+                                             cuda_knn=cuda_knn)
 
         test_set_len = len(dataset_test)
         test_data_loader = DataLoader(dataset_test, shuffle=True, collate_fn=collate)
@@ -232,6 +239,7 @@ def main():
 
     # Loss and accuracy variables
     train_losses = []
+    train_accs = []
     loss = 0
 
     if validation_set_len is not 0:
@@ -248,6 +256,9 @@ def main():
 
         t_start = datetime.now()
 
+        y_true = []
+        y_score = []
+
         # Put model in train model
         model.train()
 
@@ -257,8 +268,12 @@ def main():
             if use_cuda:
                 label = label.cuda()
 
+            y_true.append(label.detach().item())
+
             # Predict labels
             prediction = model(bg)
+
+            y_score.append(prediction.detach().item())
 
             # Compute loss
             loss = loss_func(prediction, label)
@@ -279,6 +294,9 @@ def main():
         epoch_loss /= training_set_len
         print('Training epoch {}, loss {:.4f}'.format(epoch, epoch_loss))
         train_losses.append(epoch_loss)
+        acc = roc_auc_score(y_true, y_score)
+        print("Training accuracy {:.4f}".format(acc))
+        train_accs.append(acc)
 
         t_end = datetime.now()
         print("it took {} for the training epoch to finish".format(t_end-t_start))
@@ -287,6 +305,11 @@ def main():
         if history_path:
             f = open(history_path+"train_losses.txt", "w")
             for ele in train_losses:
+                f.write(str(ele) + "\n")
+            f.close()
+
+            f = open(history_path + "train_accs.txt", "w")
+            for ele in train_accs:
                 f.write(str(ele) + "\n")
             f.close()
 
@@ -392,7 +415,7 @@ def main():
 
             # Print elapsed time
             t_end = datetime.now()
-            print("it took {} for the validation set.".format(t_end - t_start))
+            print("it took {} for the test set.".format(t_end - t_start))
 
             # Save to history if needed
             if history_path:
