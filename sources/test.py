@@ -104,7 +104,7 @@ def main():
     model.eval()
 
     # Load test dataset
-    test_set = ProstateCancerDataset(mat_file_path,
+    test_set = ProstateCancerDataset(mat_file_path=mat_file_path,
                                      fft_mat_file_path=fft_mat_file_path,
                                      train=False,
                                      k=k,
