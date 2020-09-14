@@ -7,6 +7,16 @@ from sources.data import collate
 import torch
 from sklearn.metrics import roc_auc_score
 import argparse
+import logging
+from datetime import datetime
+
+logger_level = logging.INFO
+
+logger = logging.getLogger('gnn_prostate_cancer')
+logger.setLevel(logger_level)
+ch = logging.StreamHandler()
+ch.setLevel(logger_level)
+logger.addHandler(ch)
 
 
 def main():
@@ -119,12 +129,14 @@ def main():
                                      cuda_knn=cuda_knn)
 
     dataset_len = len(test_set)
-    print("Test dataset has {} points".format(dataset_len))
+    logger.info("Test dataset has {} points".format(dataset_len))
 
     # Create the dataloader
     test_data_loader = DataLoader(test_set, shuffle=True, collate_fn=collate)
 
     with torch.no_grad():
+        t_start = datetime.now()
+
         y_true = []
         y_score = []
         for bg, label in test_data_loader:
@@ -140,7 +152,10 @@ def main():
 
         # Compute and print accuracy
         acc = roc_auc_score(y_true, y_score)
-        print("Test accuracy is {}".format(acc))
+        logger.info("Test accuracy is {}".format(acc))
+
+        t_end = datetime.now()
+        logger.info("it took {} for the test set.".format(t_end - t_start))
 
 
 if __name__ == '__main__':

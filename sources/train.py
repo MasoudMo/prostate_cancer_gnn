@@ -12,6 +12,16 @@ import argparse
 from math import floor
 from sklearn.metrics import roc_auc_score
 from datetime import datetime
+import logging
+
+
+logger_level = logging.INFO
+
+logger = logging.getLogger('gnn_prostate_cancer')
+logger.setLevel(logger_level)
+ch = logging.StreamHandler()
+ch.setLevel(logger_level)
+logger.addHandler(ch)
 
 
 def save_checkpoint(epoch, model_state_dict, optimizer_state_dict, loss, path):
@@ -162,7 +172,7 @@ def main():
                                           cuda_knn=cuda_knn)
 
     dataset_train_len = len(dataset_train)
-    print("Training dataset has {} samples".format(dataset_train_len))
+    logger.info("Training dataset has {} samples".format(dataset_train_len))
 
     # Load the test dataset if provided
     calculate_test_accuracy = False
@@ -185,13 +195,13 @@ def main():
         test_set_len = len(dataset_test)
         test_data_loader = DataLoader(dataset_test, shuffle=True, collate_fn=collate)
 
-        print("test dataset has {} samples".format(test_set_len))
+        logger.info("test dataset has {} samples".format(test_set_len))
 
     # Split training data into validation and train set
     validation_set_len = floor(val_split * dataset_train_len)
     training_set_len = dataset_train_len - validation_set_len
     training_set, validation_set = random_split(dataset_train, [training_set_len, validation_set_len])
-    print("Using {} samples for the training set and {} points for the validation set".format(training_set_len,
+    logger.info("Using {} samples for the training set and {} points for the validation set".format(training_set_len,
                                                                                               validation_set_len))
 
     # Create the data loaders for validation and training
@@ -231,7 +241,7 @@ def main():
         starting_epoch = checkpoint['epoch'] + 1
         loss = checkpoint['loss']
 
-        print("Resuming from epoch: {} with loss: {}".format(starting_epoch, loss.item()))
+        logger.info("Resuming from epoch: {} with loss: {}".format(starting_epoch, loss.item()))
 
     # Move model to GPU if available
     if use_cuda:
@@ -292,14 +302,14 @@ def main():
 
         # Find and print average epoch loss
         epoch_loss /= training_set_len
-        print('Training epoch {}, loss {:.4f}'.format(epoch, epoch_loss))
+        logger.info('Training epoch {}, loss {:.4f}'.format(epoch, epoch_loss))
         train_losses.append(epoch_loss)
         acc = roc_auc_score(y_true, y_score)
-        print("Training accuracy {:.4f}".format(acc))
+        logger.info("Training accuracy {:.4f}".format(acc))
         train_accs.append(acc)
 
         t_end = datetime.now()
-        print("it took {} for the training epoch to finish".format(t_end-t_start))
+        logger.info("it took {} for the training epoch to finish".format(t_end-t_start))
 
         # Save to history if needed
         if history_path:
@@ -346,17 +356,17 @@ def main():
 
                 # Compute and print validation loss
                 validation_loss /= validation_set_len
-                print('Validation loss {:.4f}'.format(validation_loss))
+                logger.info('Validation loss {:.4f}'.format(validation_loss))
                 # noinspection PyUnboundLocalVariable
                 val_losses.append(validation_loss)
                 acc = roc_auc_score(y_true, y_score)
-                print("Validation accuracy {:.4f}".format(acc))
+                logger.info("Validation accuracy {:.4f}".format(acc))
                 # noinspection PyUnboundLocalVariable
                 val_accs.append(acc)
 
                 # Print elapsed time
                 t_end = datetime.now()
-                print("it took {} for the validation set.".format(t_end - t_start))
+                logger.info("it took {} for the validation set.".format(t_end - t_start))
 
                 # Save to history if needed
                 if history_path:
@@ -373,7 +383,7 @@ def main():
                 if acc > max_val_acc:
                     max_val_acc = acc
                     # Save model checkpoint if validation accuracy has increased
-                    print("Validation accuracy increased. Saving model to {}".format(best_model_path))
+                    logger.info("Validation accuracy increased. Saving model to {}".format(best_model_path))
                     save_checkpoint(epoch, model.state_dict(), optimizer.state_dict(), loss, best_model_path)
 
         if calculate_test_accuracy:
@@ -405,17 +415,17 @@ def main():
             # Compute and print validation loss
             # noinspection PyUnboundLocalVariable
             test_loss /= test_set_len
-            print('Test loss {:.4f}'.format(test_loss))
+            logger.info('Test loss {:.4f}'.format(test_loss))
             # noinspection PyUnboundLocalVariable
             test_losses.append(test_loss)
             acc = roc_auc_score(y_true, y_score)
-            print("Test accuracy {:.4f}".format(acc))
+            logger.info("Test accuracy {:.4f}".format(acc))
             # noinspection PyUnboundLocalVariable
             test_accs.append(acc)
 
             # Print elapsed time
             t_end = datetime.now()
-            print("it took {} for the test set.".format(t_end - t_start))
+            logger.info("it took {} for the test set.".format(t_end - t_start))
 
             # Save to history if needed
             if history_path:
@@ -433,7 +443,7 @@ def main():
             if acc > max_test_acc:
                 max_test_acc = acc
                 # Save model checkpoint if validation accuracy has increased
-                print("Test accuracy increased. Saving model to {}".format(best_model_path))
+                logger.info("Test accuracy increased. Saving model to {}".format(best_model_path))
                 save_checkpoint(epoch, model.state_dict(), optimizer.state_dict(), loss, best_model_path)
 
 

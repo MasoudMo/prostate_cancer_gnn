@@ -9,10 +9,14 @@ import h5py
 import torch
 import dgl
 from sklearn.decomposition import PCA
+from datetime import datetime
+import logging
 try:
     import knn
 except ImportError:
     pass
+
+logger = logging.getLogger('gnn_prostate_cancer')
 
 
 def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto', threshold=None, use_gpu=False):
@@ -29,6 +33,8 @@ def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto
     Returns:
         (coo matrix): adjacency matrix as a sparse coo matrix
     """
+
+    t_start = datetime.now()
 
     if use_gpu:
 
@@ -73,6 +79,9 @@ def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto
             coo_matrix = sp.coo_matrix(adj_mat_connectivity)
             normalized_coo_matrix = normalize(coo_matrix)
 
+            t_end = datetime.now()
+            logger.debug("it took {} to create the graph".format(t_end - t_start))
+
             return normalized_coo_matrix
 
         else:
@@ -103,6 +112,9 @@ def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto
             coo_matrix = sp.coo_matrix(adj_mat_weighted)
             normalized_coo_matrix = normalize(coo_matrix)
 
+            t_end = datetime.now()
+            logger.debug("it took {} to create the graph".format(t_end - t_start))
+
             return normalized_coo_matrix
 
         # Obtain the binary adjacency matrix
@@ -112,6 +124,9 @@ def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto
 
     # Remove self-connections
     adj_mat_connectivity -= np.eye(features.shape[0])
+
+    t_end = datetime.now()
+    logger.debug("it took {} to create the graph".format(t_end - t_start))
 
     return sp.coo_matrix(adj_mat_connectivity)
 
@@ -275,9 +290,12 @@ class ProstateCancerDataset(Dataset):
 
         # Perform PCA on time domain data (To be used as node features)
         if self.perform_pca:
+            t_start = datetime.now()
             pca = PCA(n_components=self.num_pca_components)
             pca.fit(data)
             reduced_data = pca.transform(data)
+            t_end = datetime.now()
+            logger.debug("PCA Reduction for RF data took {}".format(t_end - t_start))
 
         # Create the graph using the FFT data
         if self.use_fft_data:
@@ -287,9 +305,12 @@ class ProstateCancerDataset(Dataset):
 
             # Perform PCA on FFT data
             if self.perform_pca:
+                t_start = datetime.now()
                 pca = PCA(n_components=self.num_pca_components)
                 pca.fit(freq_data)
                 reduced_freq_data = pca.transform(freq_data)
+                t_end = datetime.now()
+                logger.debug("PCA Reduction for FFT data took {}".format(t_end - t_start))
 
                 # Create the graph using reduced FFT data
                 graph = create_knn_adj_mat(reduced_freq_data,
