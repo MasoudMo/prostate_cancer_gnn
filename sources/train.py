@@ -1,13 +1,13 @@
-from sources.data import collate
+from data import collate
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch.utils.data import random_split
-from sources.data import ProstateCancerDataset
+from data import ProstateCancerDataset
 import torch
-from sources.model import GraphConvBinaryClassifier
-from sources.model import GraphAttConvBinaryClassifier
-from sources.model import GraphSageBinaryClassifier
+from model import GraphConvBinaryClassifier
+from model import GraphAttConvBinaryClassifier
+from model import GraphSageBinaryClassifier
 import argparse
 from math import floor
 from sklearn.metrics import roc_auc_score
@@ -61,7 +61,6 @@ def main():
                         help='Path to test time domain mat file')
     parser.add_argument('--fft_mat_file_path',
                         type=str,
-                        required=True,
                         help='Path to frequency domain mat file')
     parser.add_argument('--input_dim',
                         type=int,
@@ -158,6 +157,8 @@ def main():
 
     # Check whether cuda is available or not
     use_cuda = torch.cuda.is_available()
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    print("Using device: {}".format(device))
 
     # Load the train dataset
     dataset_train = ProstateCancerDataset(mat_file_path=mat_file_path,
@@ -187,9 +188,9 @@ def main():
                                              threshold=threshold,
                                              perform_pca=perform_pca,
                                              num_pca_components=input_dim,
-                                             test_data_string="data",
-                                             test_fft_data_string="FFT_train",
-                                             test_data_label_string="label",
+                                             test_data_string="data_val",
+                                             test_fft_data_string="data_val",
+                                             test_data_label_string="label_val",
                                              cuda_knn=cuda_knn)
 
         test_set_len = len(dataset_test)
@@ -276,7 +277,8 @@ def main():
         for bg, label in train_data_loader:
             # Move label and graph to GPU if available
             if use_cuda:
-                label = label.cuda()
+                torch.cuda.empty_cache()
+                label = label.to(device)
 
             y_true.append(label.detach().item())
 
@@ -339,7 +341,8 @@ def main():
                 for bg, label in val_data_loader:
                     # Move label and graph to GPU if available
                     if use_cuda:
-                        label = label.cuda()
+                        torch.cuda.empty_cache()
+                        label = label.to(device)
 
                     y_true.append(label.detach().item())
 
@@ -397,7 +400,8 @@ def main():
             for bg, label in test_data_loader:
                 # Move label and graph to GPU if available
                 if use_cuda:
-                    label = label.cuda()
+                    torch.cuda.empty_cache()
+                    label = label.to(device)
 
                 y_true.append(label.detach().item())
 

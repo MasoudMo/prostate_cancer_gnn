@@ -11,6 +11,7 @@ import dgl
 from sklearn.decomposition import PCA
 from datetime import datetime
 import logging
+import random
 try:
     import knn
 except ImportError:
@@ -38,9 +39,6 @@ def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto
 
     if use_gpu:
 
-        # Create zero matrix as the initial adjacency matrix
-        adj_mat_connectivity = np.zeros((features.shape[0], features.shape[0]))
-
         # Transpose features matrix as Cuda KNN requires to do so
         transposed_features = features.transpose()
 
@@ -48,6 +46,8 @@ def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto
         dist, idx = knn.knn(transposed_features.reshape(features.shape[1], -1),
                             transposed_features.reshape(features.shape[1], -1),
                             k)
+
+        del transposed_features
 
         # Clean up the indices and distances
         idx = idx - 1
@@ -57,27 +57,38 @@ def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto
         # Create tuples of indices where an edge exists
         rows = np.repeat(np.arange(features.shape[0]), k)
         columns = idx.flatten()
-        present_edge_idx = tuple(np.stack((rows, columns)))
+        non_zero_indices = tuple(np.stack((rows, columns)))
+
+        del rows
+        del columns
+        del idx
+
+        # Remove edges where the distance is higher than the threshold
+        if threshold:
+            indices_to_remove = dist > threshold
+            indices_to_remove = np.where(indices_to_remove)
+            non_zero_indices = tuple(np.delete(non_zero_indices, indices_to_remove, 1))
+            dist = np.delete(dist, indices_to_remove[0], 0)
+
+            del indices_to_remove
 
         if weighted:
 
-            # Remove edges where the distance is higher than the threshold
-            if threshold:
-                indices_to_remove = dist > threshold
-                indices_to_remove = np.where(indices_to_remove)
-                present_edge_idx = tuple(np.delete(present_edge_idx, indices_to_remove, 1))
-                dist = np.delete(dist, indices_to_remove[0], 0)
+            # Create zero matrix as the initial adjacency matrix
+            adj_mat_weighted = np.zeros((features.shape[0], features.shape[0]), dtype=np.float32)
 
             # Fill in the adjacency matrix with node distances
-            adj_mat_connectivity[present_edge_idx] = dist
+            adj_mat_weighted[non_zero_indices] = dist
 
             # Take reciprocal of non-zero elements to associate lower weight to higher distances
-            non_zero_indices = np.nonzero(adj_mat_connectivity)
-            adj_mat_connectivity[non_zero_indices] = 1 / adj_mat_connectivity[non_zero_indices]
+            adj_mat_weighted[non_zero_indices] = 1 / adj_mat_weighted[non_zero_indices]
 
             # Normalize rows
-            coo_matrix = sp.coo_matrix(adj_mat_connectivity)
+            coo_matrix = sp.coo_matrix(adj_mat_weighted)
             normalized_coo_matrix = normalize(coo_matrix)
+
+            # DGL requires self loops
+            normalized_coo_matrix = normalized_coo_matrix + sp.eye(normalized_coo_matrix.shape[0])
 
             t_end = datetime.now()
             logger.debug("it took {} to create the graph".format(t_end - t_start))
@@ -85,32 +96,49 @@ def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto
             return normalized_coo_matrix
 
         else:
-            # Create the binary adjacency matrix
-            adj_mat_connectivity[present_edge_idx] = 1
+            # Create eye matrix as the initial adjacency matrix
+            adj_mat_binary = np.eye(features.shape[0])
 
+            # Create the binary adjacency matrix
+            adj_mat_binary[non_zero_indices] = 1
+
+            # Remove self-connections
+            adj_mat_binary = adj_mat_binary + np.eye(features.shape[0])
+
+            t_end = datetime.now()
+            logger.debug("it took {} to create the graph".format(t_end - t_start))
+
+            return sp.coo_matrix(adj_mat_binary)
     else:
 
         # initialize and fit nearest neighbour algorithm
         neigh = NearestNeighbors(n_neighbors=k, n_jobs=n_jobs, algorithm=algorithm)
         neigh.fit(features)
 
-        if weighted:
-            # Obtain matrix with distance of k-nearest points
-            adj_mat_weighted = np.array(sp.coo_matrix(neigh.kneighbors_graph(features,
-                                                                             k,
-                                                                             mode='distance')).toarray())
+        # Obtain matrix with distance of k-nearest points
+        adj_mat_weighted = np.array(sp.coo_matrix(neigh.kneighbors_graph(features,
+                                                                         k,
+                                                                         mode='distance')).toarray())
 
-            if threshold:
-                indices_to_zero = adj_mat_weighted > threshold
-                adj_mat_weighted[indices_to_zero] = 0
+        if threshold:
+            indices_to_zero = adj_mat_weighted > threshold
+            adj_mat_weighted[indices_to_zero] = 0
+
+        non_zero_indices = np.nonzero(adj_mat_weighted)
+
+        if weighted:
 
             # Take reciprocal of non-zero elements to associate lower weight to higher distances
-            non_zero_indices = np.nonzero(adj_mat_weighted)
             adj_mat_weighted[non_zero_indices] = 1 / adj_mat_weighted[non_zero_indices]
 
             # Normalize rows
-            coo_matrix = sp.coo_matrix(adj_mat_weighted)
-            normalized_coo_matrix = normalize(coo_matrix)
+            adj_mat_weighted = sp.coo_matrix(adj_mat_weighted)
+            normalized_coo_matrix = normalize(adj_mat_weighted)
+
+            # DGL requires self loops
+            normalized_coo_matrix = normalized_coo_matrix + sp.eye(normalized_coo_matrix.shape[0])
+
+            del adj_mat_weighted
 
             t_end = datetime.now()
             logger.debug("it took {} to create the graph".format(t_end - t_start))
@@ -118,17 +146,46 @@ def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto
             return normalized_coo_matrix
 
         # Obtain the binary adjacency matrix
-        adj_mat_connectivity = np.array(sp.coo_matrix(neigh.kneighbors_graph(features,
-                                                                             k,
-                                                                             mode='connectivity')).toarray())
+        adj_mat_binary = adj_mat_weighted
+        adj_mat_binary[non_zero_indices] = 1
+        adj_mat_binary = adj_mat_binary + np.eye(adj_mat_binary.shape[0])
 
-    # Remove self-connections
-    adj_mat_connectivity -= np.eye(features.shape[0])
+        del adj_mat_weighted
 
-    t_end = datetime.now()
-    logger.debug("it took {} to create the graph".format(t_end - t_start))
+        t_end = datetime.now()
+        logger.debug("it took {} to create the graph".format(t_end - t_start))
 
-    return sp.coo_matrix(adj_mat_connectivity)
+        return sp.coo_matrix(adj_mat_binary)
+
+
+def random_distance_extractor(features, k, n_jobs=None, algorithm='auto', rows_per_matrix=10, file_path="./dist.txt"):
+    """
+    Create an adjacency matrix with distances and save the distances inside a text file.
+    Number of saved values is calculated as: (k-1)*rows_per_matrix
+        features (numpy array of node features): array of size N*M (N nodes, M feature size)
+        k (int): number of neighbours to find
+        n_jobs (int): number of jobs to deploy if GPU is not used
+        algorithm (str): Choose between auto, ball_tree, kd_tree or brute
+        rows_per_matrix (int): indicates how many rows are randomly chosen to get their distance values
+    """
+
+    # initialize and fit nearest neighbour algorithm
+    neigh = NearestNeighbors(n_neighbors=k, n_jobs=n_jobs, algorithm=algorithm)
+    neigh.fit(features)
+
+    # Obtain matrix with distance of k-nearest points
+    adj_mat_weighted = np.array(sp.coo_matrix(neigh.kneighbors_graph(features,
+                                                                     k,
+                                                                     mode='distance')).toarray())
+
+    random_rows = random.sample(range(0, adj_mat_weighted.shape[0]), rows_per_matrix)
+
+    dist = adj_mat_weighted[random_rows][np.nonzero(adj_mat_weighted[random_rows])].flatten()
+
+    f = open(file_path, "a")
+    for ele in dist:
+        f.write(str(ele) + "\n")
+    f.close()
 
 
 def draw_graph(adj_mat, label, idx, weighted=False, directed=False):
@@ -271,6 +328,7 @@ class ProstateCancerDataset(Dataset):
         self.train = train
         self.perform_pca = perform_pca
         self.num_pca_components = num_pca_components
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     def __getitem__(self, idx):
         """
@@ -345,14 +403,13 @@ class ProstateCancerDataset(Dataset):
                                            use_gpu=self.cuda_knn)
 
         # Create a dgl graph from coo_matrix
-        g = dgl.DGLGraph()
-        g.from_scipy_sparse_matrix(graph)
+        g = dgl.from_scipy(graph, device=self.device)
 
         # Put time domain signals as node features
         if self.perform_pca:
-            g.nodes[:].data['x'] = reduced_data
+            g.nodes[:].data['x'] = torch.from_numpy(reduced_data).to(self.device)
         else:
-            g.nodes[:].data['x'] = data
+            g.nodes[:].data['x'] = torch.from_numpy(data).to(self.device)
 
         return g, label
 
@@ -362,3 +419,39 @@ class ProstateCancerDataset(Dataset):
             (int): Indicates the number of available cores
         """
         return self.num_cores
+
+
+def main():
+    # Load the .mat file
+    prostate_cancer_mat_data = h5py.File("../data/BK_RF_P1_90_MICCAI_33.mat", 'r')
+    mat_data = prostate_cancer_mat_data["data_train"]
+
+    prostate_cancer_fft_mat_data = h5py.File("../data/BK_FFT_P1_90_MICCAI_33.mat", 'r')
+    mat_fft_data = prostate_cancer_fft_mat_data['data_train']
+
+    labels = np.array(prostate_cancer_mat_data['label_train'], dtype=np.int)
+
+    num_cores = mat_data.shape[0]
+
+    random_core_idx = random.sample(range(0, num_cores), 100)
+
+    for idx in random_core_idx:
+        # Obtain the label for the specified core
+        label = labels[idx][0]
+
+        # Obtain the core signals and change them into a numpy array
+        # data = np.array(prostate_cancer_mat_data[mat_data[idx, 0]][()].transpose(), dtype=np.float32)
+
+        # Use the second half of each FFT signal
+        freq_data = np.array(prostate_cancer_fft_mat_data[mat_fft_data[idx * 2 + 1, 0]][()].transpose())
+        freq_data = np.sqrt(np.power(freq_data['real'], 2) + np.power(freq_data['imag'], 2), dtype=np.float32)
+
+        pca = PCA(n_components=50)
+        pca.fit(freq_data)
+        reduced_data = pca.transform(freq_data)
+
+        random_distance_extractor(features=freq_data, k=50, rows_per_matrix=10, n_jobs=5)
+
+
+if __name__ == "__main__":
+    main()

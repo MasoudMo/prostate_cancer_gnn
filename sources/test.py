@@ -88,6 +88,8 @@ def main():
 
     # Check if cuda is available
     use_cuda = torch.cuda.is_available()
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    print("Using device: {}".format(device))
 
     # Initialize model
     model = None
@@ -141,7 +143,8 @@ def main():
         y_score = []
         for bg, label in test_data_loader:
             if use_cuda:
-                label = label.cuda()
+                torch.cuda.empty_cache()
+                label = label.to(device)
 
             y_true.append(label.detach().item())
 
