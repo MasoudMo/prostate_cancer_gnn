@@ -13,7 +13,7 @@ from datetime import datetime
 import logging
 import random
 try:
-    import knn
+    from knn_cuda import KNN
 except ImportError:
     pass
 
@@ -34,25 +34,27 @@ def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto
     Returns:
         (coo matrix): adjacency matrix as a sparse coo matrix
     """
-
+    print(features.shape)
     t_start = datetime.now()
 
     if use_gpu:
 
-        # Transpose features matrix as Cuda KNN requires to do so
-        transposed_features = features.transpose()
+        features_extra_dim = np.expand_dims(features, axis=2)
+
+        knn = KNN(k=k, transpose_mode=True)
 
         # Find the k nearest neighbours and their distance
-        dist, idx = knn.knn(transposed_features.reshape(features.shape[1], -1),
-                            transposed_features.reshape(features.shape[1], -1),
-                            k)
+        dist, idx = knn(torch.from_numpy(features_extra_dim).cuda(), torch.from_numpy(features_extra_dim).clone().cuda())
 
-        del transposed_features
+        torch.cuda.empty_cache()
 
+        del features_extra_dim
+
+        idx = idx.cpu()
+        dist = dist.cpu()
+        
         # Clean up the indices and distances
-        idx = idx - 1
-        idx = idx.transpose()
-        dist = dist.transpose().flatten()
+        dist = dist.flatten()
 
         # Create tuples of indices where an edge exists
         rows = np.repeat(np.arange(features.shape[0]), k)
@@ -80,6 +82,8 @@ def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto
             # Fill in the adjacency matrix with node distances
             adj_mat_weighted[non_zero_indices] = dist
 
+            non_zero_indices = np.nonzero(adj_mat_weighted)
+
             # Take reciprocal of non-zero elements to associate lower weight to higher distances
             adj_mat_weighted[non_zero_indices] = 1 / adj_mat_weighted[non_zero_indices]
 
@@ -97,13 +101,10 @@ def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto
 
         else:
             # Create eye matrix as the initial adjacency matrix
-            adj_mat_binary = np.eye(features.shape[0])
+            adj_mat_binary = np.zeros((features.shape[0], features.shape[0]))
 
             # Create the binary adjacency matrix
             adj_mat_binary[non_zero_indices] = 1
-
-            # Remove self-connections
-            adj_mat_binary = adj_mat_binary + np.eye(features.shape[0])
 
             t_end = datetime.now()
             logger.debug("it took {} to create the graph".format(t_end - t_start))
