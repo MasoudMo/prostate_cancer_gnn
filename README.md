@@ -1,3 +1,7 @@
 # prostate_cancer_gnn
 
-This cuda implementation of knn algorithm is used: https://github.com/unlimblue/KNN_CUDA
+This project aims to predict whether biopsy cores are cancerous or healthy using Graph Neural Networks.
+
+Data is not originally in graph form, and the graphs are created using the input FFT data while node features are the RF time domain data.
+
+The cuda implementation of knn algorithm used in the graph creation step is from this library: https://github.com/unlimblue/KNN_CUDA
