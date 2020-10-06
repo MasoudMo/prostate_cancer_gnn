@@ -405,8 +405,7 @@ class ProstateCancerDataset(Dataset):
                                            use_gpu=self.cuda_knn)
 
         # Create a dgl graph from coo_matrix
-        g = dgl.DGLGraph()
-        g.from_scipy_sparse_matrix(graph)
+        g = dgl.from_scipy(graph, device=self.device)
 
         # Put time domain signals as node features
         if self.perform_pca:
@@ -425,6 +424,7 @@ class ProstateCancerDataset(Dataset):
 
 
 def main():
+    print("this is main")
     # Load the .mat file
     # prostate_cancer_mat_data = h5py.File("../data/BK_RF_P91_110.mat", 'r')
     # mat_data = prostate_cancer_mat_data["data"]
