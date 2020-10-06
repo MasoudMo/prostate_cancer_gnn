@@ -12,6 +12,7 @@ from sklearn.decomposition import PCA
 from datetime import datetime
 import logging
 import random
+from sklearn.manifold import TSNE
 try:
     from knn_cuda import KNN
 except ImportError:
@@ -404,7 +405,8 @@ class ProstateCancerDataset(Dataset):
                                            use_gpu=self.cuda_knn)
 
         # Create a dgl graph from coo_matrix
-        g = dgl.from_scipy(graph, device=self.device)
+        g = dgl.DGLGraph()
+        g.from_scipy_sparse_matrix(graph)
 
         # Put time domain signals as node features
         if self.perform_pca:
@@ -424,34 +426,45 @@ class ProstateCancerDataset(Dataset):
 
 def main():
     # Load the .mat file
-    prostate_cancer_mat_data = h5py.File("../data/BK_RF_P1_90_MICCAI_33.mat", 'r')
-    mat_data = prostate_cancer_mat_data["data_train"]
+    # prostate_cancer_mat_data = h5py.File("../data/BK_RF_P91_110.mat", 'r')
+    # mat_data = prostate_cancer_mat_data["data"]
+    #
+    # prostate_cancer_fft_mat_data = h5py.File("../data/BK_RF_FFT_resmp_2_100_P91_110.mat", 'r')
+    # mat_fft_data = prostate_cancer_fft_mat_data['FFT_train']
+    #
+    # labels = np.array(prostate_cancer_mat_data['label'], dtype=np.int)
+    #
+    # num_cores = mat_data.shape[0]
+    #
+    # random_core_idx = random.sample(range(0, num_cores), 100)
+    #
+    # for idx in random_core_idx:
+    #     # Obtain the label for the specified core
+    #     label = labels[idx][0]
+    #
+    #     # Obtain the core signals and change them into a numpy array
+    #     # data = np.array(prostate_cancer_mat_data[mat_data[idx, 0]][()].transpose(), dtype=np.float32)
+    #
+    #     # Use the second half of each FFT signal
+    #     freq_data = np.array(prostate_cancer_fft_mat_data[mat_fft_data[idx * 2 + 1, 0]][()].transpose()[:, 0:100:2])
+    #     freq_data = np.sqrt(np.power(freq_data['real'], 2) + np.power(freq_data['imag'], 2), dtype=np.float32)
+    #
+    #     pca = PCA(n_components=50)
+    #     pca.fit(freq_data)
+    #     reduced_data = pca.transform(freq_data)
+    #
+    #     random_distance_extractor(features=freq_data, k=50, rows_per_matrix=10, n_jobs=5)
 
-    prostate_cancer_fft_mat_data = h5py.File("../data/BK_FFT_P1_90_MICCAI_33.mat", 'r')
-    mat_fft_data = prostate_cancer_fft_mat_data['data_train']
 
-    labels = np.array(prostate_cancer_mat_data['label_train'], dtype=np.int)
-
-    num_cores = mat_data.shape[0]
-
-    random_core_idx = random.sample(range(0, num_cores), 100)
-
-    for idx in random_core_idx:
-        # Obtain the label for the specified core
-        label = labels[idx][0]
-
-        # Obtain the core signals and change them into a numpy array
-        # data = np.array(prostate_cancer_mat_data[mat_data[idx, 0]][()].transpose(), dtype=np.float32)
-
-        # Use the second half of each FFT signal
-        freq_data = np.array(prostate_cancer_fft_mat_data[mat_fft_data[idx * 2 + 1, 0]][()].transpose())
-        freq_data = np.sqrt(np.power(freq_data['real'], 2) + np.power(freq_data['imag'], 2), dtype=np.float32)
-
-        pca = PCA(n_components=50)
-        pca.fit(freq_data)
-        reduced_data = pca.transform(freq_data)
-
-        random_distance_extractor(features=freq_data, k=50, rows_per_matrix=10, n_jobs=5)
+    # Plot embeddings after TSNE
+    # x = np.loadtxt("./graph_embeddings_label_itr_10.txt", delimiter=" ")
+    #
+    # labels = x[:, 0]
+    # x = np.delete(x, 0, axis=1)
+    # x_embedded = TSNE(n_components=2).fit_transform(x)
+    # colors = ['green' if l == 0 else 'red' for l in labels]
+    # plt.scatter(x_embedded[:, 0], x_embedded[:, 1], color=colors)
+    # plt.show()
 
 
 if __name__ == "__main__":
