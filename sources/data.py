@@ -35,7 +35,6 @@ def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto
     Returns:
         (coo matrix): adjacency matrix as a sparse coo matrix
     """
-    print(features.shape)
     t_start = datetime.now()
 
     if use_gpu:
