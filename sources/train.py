@@ -8,6 +8,9 @@ import torch
 from model import GraphConvBinaryClassifier
 from model import GraphAttConvBinaryClassifier
 from model import GraphSageBinaryClassifier
+from model import GatedGraphConvBinaryClassifier
+from model import SimpleGraphConvBinaryClassifier
+from model import ChebConvBinaryClassifier
 import argparse
 from math import floor
 from sklearn.metrics import roc_auc_score
@@ -98,6 +101,10 @@ def main():
                         type=bool,
                         default=False,
                         help='Indicates whether the graph created using GPU')
+    parser.add_argument('--embeddings_path',
+                        type=str,
+                        default=None,
+                        help='Path to save graph embeddings to')
     parser.add_argument('--best_model_path',
                         type=str,
                         default='../model/model.pt',
@@ -113,7 +120,7 @@ def main():
     parser.add_argument('--gnn_type',
                         type=str,
                         default='gcn',
-                        help='GNN type to use for the classifier {gcn, gat, graphsage}')
+                        help='GNN type to use for the classifier {gcn, gat, sage, gated, sg, cheb}')
     parser.add_argument('--feat_drop',
                         type=float,
                         default='0',
@@ -154,6 +161,7 @@ def main():
     feat_drop = args.feat_drop
     attn_drop = args.attn_drop
     cuda_knn = args.cuda_knn
+    embeddings_path = args.embeddings_path
 
     # Check whether cuda is available or not
     use_cuda = torch.cuda.is_available()
@@ -221,11 +229,17 @@ def main():
                                              use_cuda=use_cuda,
                                              feat_drop=feat_drop,
                                              attn_drop=attn_drop)
-    elif gnn_type == 'graphsage':
+    elif gnn_type == 'sage':
         model = GraphSageBinaryClassifier(in_dim=input_dim,
                                           hidden_dim=hidden_dim,
                                           use_cuda=use_cuda,
                                           feat_drop=feat_drop)
+    elif gnn_type == "cheb":
+        model = ChebConvBinaryClassifier(in_dim=input_dim, hidden_dim=hidden_dim, use_cuda=use_cuda)
+    elif gnn_type == "gated":
+        model = GatedGraphConvBinaryClassifier(in_dim=input_dim, hidden_dim=hidden_dim, use_cuda=use_cuda)
+    elif gnn_type == "sg":
+        model = SimpleGraphConvBinaryClassifier(in_dim=input_dim, hidden_dim=hidden_dim, use_cuda=use_cuda)
 
     # Initialize loss function and optimizer
     loss_func = nn.BCELoss()
@@ -283,7 +297,14 @@ def main():
             y_true.append(label.detach().item())
 
             # Predict labels
-            prediction = model(bg)
+            if embeddings_path is not None:
+                prediction = model(bg,
+                                   itr=epoch,
+                                   label=label,
+                                   save_embedding=True,
+                                   embedding_path=embeddings_path+"train")
+            else:
+                prediction = model(bg)
 
             y_score.append(prediction.detach().item())
 
@@ -309,7 +330,6 @@ def main():
         acc = roc_auc_score(y_true, y_score)
         logger.info("Training accuracy {:.4f}".format(acc))
         train_accs.append(acc)
-
         t_end = datetime.now()
         logger.info("it took {} for the training epoch to finish".format(t_end-t_start))
 
@@ -347,7 +367,14 @@ def main():
                     y_true.append(label.detach().item())
 
                     # Predict labels
-                    prediction = model(bg)
+                    if embeddings_path is not None:
+                        prediction = model(bg,
+                                           itr=epoch,
+                                           label=label,
+                                           save_embedding=True,
+                                           embedding_path=embeddings_path+"val")
+                    else:
+                        prediction = model(bg)
 
                     y_score.append(prediction.detach().item())
 
@@ -406,7 +433,14 @@ def main():
                 y_true.append(label.detach().item())
 
                 # Predict labels
-                prediction = model(bg)
+                if embeddings_path is not None:
+                    prediction = model(bg,
+                                       itr=epoch,
+                                       label=label,
+                                       save_embedding=True,
+                                       embedding_path=embeddings_path+"test")
+                else:
+                    prediction = model(bg)
 
                 y_score.append(prediction.detach().item())
 

@@ -1,6 +1,9 @@
 from sources.model import GraphConvBinaryClassifier
 from sources.model import GraphAttConvBinaryClassifier
 from sources.model import GraphSageBinaryClassifier
+from sources.model import GatedGraphConvBinaryClassifier
+from sources.model import SimpleGraphConvBinaryClassifier
+from sources.model import ChebConvBinaryClassifier
 from sources.data import ProstateCancerDataset
 from torch.utils.data import DataLoader
 from sources.data import collate
@@ -61,7 +64,7 @@ def main():
     parser.add_argument('--gnn_type',
                         type=str,
                         default='gcn',
-                        help='GNN type to use for the classifier {gcn, gat, graphsage}')
+                        help='GNN type to use for the classifier {gcn, gat, sage, gated, cheb, sg}')
     parser.add_argument('--threshold',
                         type=float,
                         default=None,
@@ -98,11 +101,20 @@ def main():
     elif gnn_type == 'gat':
         model = GraphAttConvBinaryClassifier(in_dim=input_dim,
                                              hidden_dim=hidden_dim,
-                                             use_cuda=use_cuda)
-    elif gnn_type == 'graphsage':
+                                             use_cuda=use_cuda,
+                                             feat_drop=feat_drop,
+                                             attn_drop=attn_drop)
+    elif gnn_type == 'sage':
         model = GraphSageBinaryClassifier(in_dim=input_dim,
                                           hidden_dim=hidden_dim,
-                                          use_cuda=use_cuda)
+                                          use_cuda=use_cuda,
+                                          feat_drop=feat_drop)
+    elif gnn_type == "cheb":
+        model = ChebConvBinaryClassifier(in_dim=input_dim, hidden_dim=hidden_dim, use_cuda=use_cuda)
+    elif gnn_type == "gated":
+        model = GatedGraphConvBinaryClassifier(in_dim=input_dim, hidden_dim=hidden_dim, use_cuda=use_cuda)
+    elif gnn_type == "sg":
+        model = SimpleGraphConvBinaryClassifier(in_dim=input_dim, hidden_dim=hidden_dim, use_cuda=use_cuda)
 
     # Load the saved model
     checkpoint = torch.load(model_path)
