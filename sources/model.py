@@ -33,7 +33,7 @@ class GraphConvBinaryClassifier(nn.Module):
 
         self.use_cuda = use_cuda
 
-    def forward(self, g, itr, label, save_embedding=False, embedding_path="./"):
+    def forward(self, g, itr=None, label=None, embedding_path=None):
         """
         Forward path of classifier
         Parameter:
@@ -58,7 +58,7 @@ class GraphConvBinaryClassifier(nn.Module):
 
         # Save graph embeddings to a text file for each epoch
         with torch.no_grad():
-            if save_embedding:
+            if embedding_path is not None:
                 f = open(embedding_path+"_graph_embeddings_itr_" + str(itr) + ".txt", "a+")
                 f.write(str(int(label.cpu().numpy()[0][0])) + " ")
                 np.savetxt(f, hg.cpu().detach().numpy())
@@ -89,7 +89,7 @@ class GatedGraphConvBinaryClassifier(nn.Module):
 
         self.use_cuda = use_cuda
 
-    def forward(self, g, itr, label, save_embedding=False, embedding_path="./"):
+    def forward(self, g, itr=None, label=None, embedding_path=None):
         """
         Forward path of classifier
         Parameter:
@@ -114,7 +114,7 @@ class GatedGraphConvBinaryClassifier(nn.Module):
 
         # Save graph embeddings to a text file for each epoch
         with torch.no_grad():
-            if save_embedding:
+            if embedding_path is not None:
                 f = open(embedding_path+"_graph_embeddings_itr_" + str(itr) + ".txt", "a+")
                 f.write(str(int(label.cpu().numpy()[0][0])) + " ")
                 np.savetxt(f, hg.cpu().detach().numpy())
@@ -145,7 +145,7 @@ class SimpleGraphConvBinaryClassifier(nn.Module):
 
         self.use_cuda = use_cuda
 
-    def forward(self, g, itr, label, save_embedding=False, embedding_path="./"):
+    def forward(self, g, itr=None, label=None, embedding_path=None):
         """
         Forward path of classifier
         Parameter:
@@ -170,9 +170,10 @@ class SimpleGraphConvBinaryClassifier(nn.Module):
 
         # Save graph embeddings to a text file for each epoch
         with torch.no_grad():
-            if save_embedding:
+            if embedding_path is not None:
                 f = open(embedding_path+"_graph_embeddings_itr_" + str(itr) + ".txt", "a+")
                 f.write(str(int(label.cpu().numpy()[0][0])) + " ")
+
                 np.savetxt(f, hg.cpu().detach().numpy())
                 f.close()
 
@@ -203,7 +204,7 @@ class GraphAttConvBinaryClassifier(nn.Module):
 
         self.use_cuda = use_cuda
 
-    def forward(self, g, itr, label, save_embedding=False, embedding_path="./"):
+    def forward(self, g, itr=None, label=None, embedding_path=None):
         """
         Forward path of classifier
         Parameter:
@@ -228,7 +229,7 @@ class GraphAttConvBinaryClassifier(nn.Module):
 
         # Save graph embeddings to a text file for each epoch
         with torch.no_grad():
-            if save_embedding:
+            if embedding_path is not None:
                 f = open(embedding_path+"_graph_embeddings_itr_" + str(itr) + ".txt", "a+")
                 f.write(str(int(label.cpu().numpy()[0][0])) + " ")
                 np.savetxt(f, hg.cpu().detach().numpy())
@@ -261,7 +262,7 @@ class GraphSageBinaryClassifier(nn.Module):
 
         self.use_cuda = use_cuda
 
-    def forward(self, g, itr, label, save_embedding=False, embedding_path="./"):
+    def forward(self, g, itr=None, label=None, embedding_path=None):
         """
         Forward path of classifier
         Parameter:
@@ -286,7 +287,7 @@ class GraphSageBinaryClassifier(nn.Module):
 
         # Save graph embeddings to a text file for each epoch
         with torch.no_grad():
-            if save_embedding:
+            if embedding_path is not None:
                 f = open(embedding_path+"_graph_embeddings_itr_" + str(itr) + ".txt", "a+")
                 f.write(str(int(label.cpu().numpy()[0][0])) + " ")
                 np.savetxt(f, hg.cpu().detach().numpy())
@@ -317,7 +318,7 @@ class ChebConvBinaryClassifier(nn.Module):
 
         self.use_cuda = use_cuda
 
-    def forward(self, g, itr, label, save_embedding=False, embedding_path="./"):
+    def forward(self, g, itr=None, label=None, embedding_path=None):
         """
         Forward path of classifier
         Parameter:
@@ -342,7 +343,7 @@ class ChebConvBinaryClassifier(nn.Module):
 
         # Save graph embeddings to a text file for each epoch
         with torch.no_grad():
-            if save_embedding:
+            if embedding_path is not None:
                 f = open(embedding_path+"_graph_embeddings_itr_" + str(itr) + ".txt", "a+")
                 f.write(str(int(label.cpu().numpy()[0][0])) + " ")
                 np.savetxt(f, hg.cpu().detach().numpy())

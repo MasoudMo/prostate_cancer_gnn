@@ -1,12 +1,12 @@
-from sources.model import GraphConvBinaryClassifier
-from sources.model import GraphAttConvBinaryClassifier
-from sources.model import GraphSageBinaryClassifier
-from sources.model import GatedGraphConvBinaryClassifier
-from sources.model import SimpleGraphConvBinaryClassifier
-from sources.model import ChebConvBinaryClassifier
-from sources.data import ProstateCancerDataset
+from model import GraphConvBinaryClassifier
+from model import GraphAttConvBinaryClassifier
+from model import GraphSageBinaryClassifier
+from model import GatedGraphConvBinaryClassifier
+from model import SimpleGraphConvBinaryClassifier
+from model import ChebConvBinaryClassifier
+from data import ProstateCancerDataset
 from torch.utils.data import DataLoader
-from sources.data import collate
+from data import collate
 import torch
 from sklearn.metrics import roc_auc_score
 import argparse
@@ -101,14 +101,11 @@ def main():
     elif gnn_type == 'gat':
         model = GraphAttConvBinaryClassifier(in_dim=input_dim,
                                              hidden_dim=hidden_dim,
-                                             use_cuda=use_cuda,
-                                             feat_drop=feat_drop,
-                                             attn_drop=attn_drop)
+                                             use_cuda=use_cuda)
     elif gnn_type == 'sage':
         model = GraphSageBinaryClassifier(in_dim=input_dim,
                                           hidden_dim=hidden_dim,
-                                          use_cuda=use_cuda,
-                                          feat_drop=feat_drop)
+                                          use_cuda=use_cuda)
     elif gnn_type == "cheb":
         model = ChebConvBinaryClassifier(in_dim=input_dim, hidden_dim=hidden_dim, use_cuda=use_cuda)
     elif gnn_type == "gated":
