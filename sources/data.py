@@ -247,9 +247,9 @@ def collate(samples):
     """
     Collate function used by the data loader to put graphs into a batch
     """
-    graphs, labels = map(list, zip(*samples))
+    graphs, labels, cg = map(list, zip(*samples))
     batched_graph = dgl.batch(graphs)
-    return batched_graph, torch.reshape(torch.tensor(labels, dtype=torch.float), [-1, 1])
+    return batched_graph, torch.reshape(torch.tensor(labels, dtype=torch.float), [-1, 1]), cg
 
 
 class ProstateCancerDataset(Dataset):
@@ -267,6 +267,8 @@ class ProstateCancerDataset(Dataset):
                  threshold=None,
                  perform_pca=False,
                  num_pca_components=None,
+                 get_cancer_grade=False,
+                 cancer_grade_string='GS_train',
                  train_data_string='data_train',
                  test_data_string='data_test',
                  train_fft_data_string='data_train',
@@ -288,6 +290,8 @@ class ProstateCancerDataset(Dataset):
                                valid when weighted is set to True)
             perform_pca (bool): Indicates whether PCA dimension reduction is performed on data or not
             num_pca_components (int): Indicates the number of components for PCA
+            get_cancer_grade (bool): Indicates whether cancer grade is to be extracted from the mat file
+            train_data_string (str): String associated with cancer grade in the mat file
             train_data_string (str): If train data string is anything other than data_train, specify it
             test_data_string (str): If test data string is anything other than data_test, specify it
             train_fft_data_string (str): If train data string is anything other than data_train, specify it
@@ -318,6 +322,9 @@ class ProstateCancerDataset(Dataset):
         self.labels = np.array(self.prostate_cancer_mat_data[
                                    train_data_label_string if train else test_data_label_string], dtype=np.int)
 
+        if get_cancer_grade:
+            self.cg = self.prostate_cancer_mat_data[cancer_grade_string]
+
         # Parameters used in graph creation
         self.weighted = weighted
         self.k = k
@@ -330,6 +337,7 @@ class ProstateCancerDataset(Dataset):
         self.perform_pca = perform_pca
         self.num_pca_components = num_pca_components
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.get_cancer_grade = get_cancer_grade
 
     def __getitem__(self, idx):
         """
@@ -340,9 +348,17 @@ class ProstateCancerDataset(Dataset):
             (numpy array): Numpy array containing the signals for a single core
             (int): Label indicating whether the core is cancerous or healthy
         """
+        if idx is 45:
+            idx = 46
 
         # Obtain the label for the specified core
         label = self.labels[idx][0]
+
+        # Obtain the cancer grade
+        cg = None
+        if self.get_cancer_grade:
+            cg = self.prostate_cancer_mat_data[self.cg[idx][0]]
+            cg = ''.join(chr(i) for i in cg)
 
         # Obtain the core signals and change them into a numpy array
         data = np.array(self.prostate_cancer_mat_data[self.mat_data[idx, 0]][()].transpose(), dtype=np.float32)
@@ -412,7 +428,7 @@ class ProstateCancerDataset(Dataset):
         else:
             g.nodes[:].data['x'] = torch.from_numpy(data).to(self.device)
 
-        return g, label
+        return g, label, cg
 
     def __len__(self):
         """
@@ -456,14 +472,17 @@ def main():
 
 
     # Plot embeddings after TSNE
-    # x = np.loadtxt("./graph_embeddings_label_itr_10.txt", delimiter=" ")
-    #
-    # labels = x[:, 0]
-    # x = np.delete(x, 0, axis=1)
-    # x_embedded = TSNE(n_components=2).fit_transform(x)
-    # colors = ['green' if l == 0 else 'red' for l in labels]
-    # plt.scatter(x_embedded[:, 0], x_embedded[:, 1], color=colors)
-    # plt.show()
+    for i in range(210):
+        x = np.loadtxt("D:/Workplace/ML/Documents/sg_13-4train_graph_embeddings_itr_"+str(i)+".txt", delimiter=" ")
+
+        labels = x[:, 0]
+        x = np.delete(x, 0, axis=1)
+        x_embedded = TSNE(n_components=2, random_state=5).fit_transform(x)
+        colors = ['green' if l == 0 else 'red' for l in labels]
+        plt.scatter(x_embedded[:, 0], x_embedded[:, 1], color=colors)
+        plt.title("SGConv-13-4  -- itr: "+str(i))
+        plt.savefig("./SGConv-test-13-4_itr_"+str(i))
+        plt.close()
 
 
 if __name__ == "__main__":

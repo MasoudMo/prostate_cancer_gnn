@@ -54,6 +54,10 @@ def main():
                         type=str,
                         required=True,
                         help='Path to time domain mat file')
+    parser.add_argument('--fft_mat_file_path',
+                        type=str,
+                        default=None,
+                        help='Path to frequency domain mat file')
     parser.add_argument('--test_mat_file_path',
                         type=str,
                         default=None,
@@ -62,9 +66,11 @@ def main():
                         type=str,
                         default=None,
                         help='Path to test time domain mat file')
-    parser.add_argument('--fft_mat_file_path',
+    parser.add_argument('--val_fft_mat_file_path',
                         type=str,
-                        help='Path to frequency domain mat file')
+                        default=None,
+                        help='Path to validation time domain mat file (Only provide if not splitting training data for '
+                             'validation)')
     parser.add_argument('--input_dim',
                         type=int,
                         default='200',
@@ -77,10 +83,6 @@ def main():
                         type=float,
                         default='0.001',
                         help='Learning rate')
-    parser.add_argument('--val_split',
-                        type=float,
-                        default='0.2',
-                        help='Validation set split')
     parser.add_argument('--epochs',
                         type=int,
                         default='20',
@@ -137,6 +139,20 @@ def main():
                         type=bool,
                         default=False,
                         help='Perform PCA reduction (input_dim is used as number of components)')
+    parser.add_argument('--get_cancer_grade',
+                        type=bool,
+                        default=False,
+                        help='Extract cancer grade information from the dataset.')
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--val_mat_file_path',
+                       type=str,
+                       default=None,
+                       help='Path to validation time domain mat file (Only provide if not splitting training data for '
+                            'validation)')
+    group.add_argument('--val_split',
+                       type=float,
+                       default=0.0,
+                       help='Validation set split')
     args = parser.parse_args()
 
     # Common arguments
@@ -144,6 +160,8 @@ def main():
     fft_mat_file_path = args.fft_mat_file_path
     test_mat_file_path = args.test_mat_file_path
     test_fft_mat_file_path = args.test_fft_mat_file_path
+    val_mat_file_path = args.val_mat_file_path
+    val_fft_mat_file_path = args.val_fft_mat_file_path
     hidden_dim = args.hidden_dim
     input_dim = args.input_dim
     lr = args.learning_rate
@@ -162,6 +180,7 @@ def main():
     attn_drop = args.attn_drop
     cuda_knn = args.cuda_knn
     embeddings_path = args.embeddings_path
+    get_cancer_grade = args.get_cancer_grade
 
     # Check whether cuda is available or not
     use_cuda = torch.cuda.is_available()
@@ -178,10 +197,36 @@ def main():
                                           threshold=threshold,
                                           perform_pca=perform_pca,
                                           num_pca_components=input_dim,
-                                          cuda_knn=cuda_knn)
+                                          cuda_knn=cuda_knn,
+                                          get_cancer_grade=get_cancer_grade)
 
     dataset_train_len = len(dataset_train)
     logger.info("Training dataset has {} samples".format(dataset_train_len))
+
+    # Load the validation dataset if it's provided separately
+    calculate_validation_accuracy = False
+    if val_mat_file_path:
+        calculate_validation_accuracy = True
+        dataset_val = ProstateCancerDataset(mat_file_path=val_mat_file_path,
+                                            train=False,
+                                            k=k,
+                                            weighted=weighted,
+                                            knn_n_jobs=knn_n_jobs,
+                                            fft_mat_file_path=val_fft_mat_file_path,
+                                            threshold=threshold,
+                                            perform_pca=perform_pca,
+                                            num_pca_components=input_dim,
+                                            test_data_string="data_val",
+                                            test_fft_data_string="data_val",
+                                            test_data_label_string="label_val",
+                                            get_cancer_grade=get_cancer_grade,
+                                            cancer_grade_string="GS_val",
+                                            cuda_knn=cuda_knn)
+
+        val_set_len = len(dataset_val)
+        val_data_loader = DataLoader(dataset_val, shuffle=True, collate_fn=collate)
+
+        logger.info("Validation dataset has {} samples.".format(val_set_len))
 
     # Load the test dataset if provided
     calculate_test_accuracy = False
@@ -196,28 +241,42 @@ def main():
                                              threshold=threshold,
                                              perform_pca=perform_pca,
                                              num_pca_components=input_dim,
-                                             test_data_string="data_val",
-                                             test_fft_data_string="data_val",
-                                             test_data_label_string="label_val",
+                                             test_data_string="data",
+                                             test_fft_data_string="FFT_train",
+                                             test_data_label_string="label",
+                                             get_cancer_grade=get_cancer_grade,
+                                             cancer_grade_string="GS",
                                              cuda_knn=cuda_knn)
 
         test_set_len = len(dataset_test)
         test_data_loader = DataLoader(dataset_test, shuffle=True, collate_fn=collate)
 
-        logger.info("test dataset has {} samples".format(test_set_len))
+        logger.info("Test dataset has {} samples.".format(test_set_len))
 
     # Split training data into validation and train set
-    validation_set_len = floor(val_split * dataset_train_len)
-    training_set_len = dataset_train_len - validation_set_len
-    training_set, validation_set = random_split(dataset_train, [training_set_len, validation_set_len])
-    logger.info("Using {} samples for the training set and {} points for the validation set".format(training_set_len,
-                                                                                              validation_set_len))
+    if val_mat_file_path is None:
+        val_set_len = floor(val_split * dataset_train_len)
+        training_set_len = dataset_train_len - val_set_len
+        training_set, validation_set = random_split(dataset_train, [training_set_len, val_set_len])
 
-    # Create the data loaders for validation and training
-    train_data_loader = DataLoader(training_set, shuffle=True, collate_fn=collate)
+        # Create validation dataset
+        if val_set_len is not 0:
+            calculate_validation_accuracy = True
+            val_data_loader = DataLoader(validation_set, shuffle=True, collate_fn=collate)
 
-    if validation_set_len is not 0:
-        val_data_loader = DataLoader(validation_set, shuffle=True, collate_fn=collate)
+        # Create the data loaders for validation and training
+        train_data_loader = DataLoader(training_set, shuffle=True, collate_fn=collate)
+
+        logger.info("Using {} samples for the training set and {} points for the validation set.".format(
+            training_set_len,
+            val_set_len))
+
+    else:
+        # Create the data loaders for validation and training
+        train_data_loader = DataLoader(dataset_train, shuffle=True, collate_fn=collate)
+        training_set_len = len(dataset_train)
+
+        logger.info("Training dataset has {} samples.".format(training_set_len))
 
     # Initialize model
     model = None
@@ -267,13 +326,12 @@ def main():
     train_accs = []
     loss = 0
 
-    if validation_set_len is not 0:
+    if calculate_validation_accuracy:
         max_val_acc = 0
         val_accs = []
         val_losses = []
 
     if calculate_test_accuracy:
-        max_test_acc = 0
         test_accs = []
         test_losses = []
 
@@ -288,7 +346,7 @@ def main():
         model.train()
 
         epoch_loss = 0
-        for bg, label in train_data_loader:
+        for bg, label, cg in train_data_loader:
             # Move label and graph to GPU if available
             if use_cuda:
                 torch.cuda.empty_cache()
@@ -299,10 +357,10 @@ def main():
             # Predict labels
             if embeddings_path is not None:
                 prediction = model(bg,
-                                   itr=epoch,
-                                   label=label,
-                                   save_embedding=True,
-                                   embedding_path=embeddings_path+"train")
+                                   epoch,
+                                   label,
+                                   cg,
+                                   embeddings_path+"train")
             else:
                 prediction = model(bg)
 
@@ -349,7 +407,7 @@ def main():
         model.eval()
 
         # Find validation loss
-        if validation_set_len is not 0:
+        if calculate_validation_accuracy:
 
             t_start = datetime.now()
 
@@ -358,7 +416,7 @@ def main():
                 y_score = []
                 validation_loss = 0
                 # noinspection PyUnboundLocalVariable
-                for bg, label in val_data_loader:
+                for bg, label, cg in val_data_loader:
                     # Move label and graph to GPU if available
                     if use_cuda:
                         torch.cuda.empty_cache()
@@ -369,10 +427,10 @@ def main():
                     # Predict labels
                     if embeddings_path is not None:
                         prediction = model(bg,
-                                           itr=epoch,
-                                           label=label,
-                                           save_embedding=True,
-                                           embedding_path=embeddings_path+"val")
+                                           epoch,
+                                           label,
+                                           cg,
+                                           embeddings_path+"val")
                     else:
                         prediction = model(bg)
 
@@ -385,7 +443,7 @@ def main():
                     validation_loss += loss.detach().item()
 
                 # Compute and print validation loss
-                validation_loss /= validation_set_len
+                validation_loss /= val_set_len
                 logger.info('Validation loss {:.4f}'.format(validation_loss))
                 # noinspection PyUnboundLocalVariable
                 val_losses.append(validation_loss)
@@ -424,7 +482,7 @@ def main():
             y_score = []
             test_loss = 0
             # noinspection PyUnboundLocalVariable
-            for bg, label in test_data_loader:
+            for bg, label, cg in test_data_loader:
                 # Move label and graph to GPU if available
                 if use_cuda:
                     torch.cuda.empty_cache()
@@ -435,10 +493,10 @@ def main():
                 # Predict labels
                 if embeddings_path is not None:
                     prediction = model(bg,
-                                       itr=epoch,
-                                       label=label,
-                                       save_embedding=True,
-                                       embedding_path=embeddings_path+"test")
+                                       epoch,
+                                       label,
+                                       cg,
+                                       embeddings_path+"test")
                 else:
                     prediction = model(bg)
 
@@ -476,13 +534,6 @@ def main():
                 for ele in test_accs:
                     f.write(str(ele) + "\n")
                 f.close()
-
-            # noinspection PyUnboundLocalVariable
-            if acc > max_test_acc:
-                max_test_acc = acc
-                # Save model checkpoint if validation accuracy has increased
-                logger.info("Test accuracy increased. Saving model to {}".format(best_model_path))
-                save_checkpoint(epoch, model.state_dict(), optimizer.state_dict(), loss, best_model_path)
 
 
 if __name__ == "__main__":

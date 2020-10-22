@@ -28,12 +28,13 @@ class GraphConvBinaryClassifier(nn.Module):
         # Model layers
         self.conv1 = GraphConv(in_dim, hidden_dim)
         self.conv2 = GraphConv(hidden_dim, hidden_dim)
-        self.fc = nn.Linear(hidden_dim, 1)
+        self.fc_1 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc_2 = nn.Linear(hidden_dim, 1)
         self.out_act = nn.Sigmoid()
 
         self.use_cuda = use_cuda
 
-    def forward(self, g, itr=None, label=None, embedding_path=None):
+    def forward(self, g, itr=None, label=None, cg=None, embedding_path=None):
         """
         Forward path of classifier
         Parameter:
@@ -53,14 +54,16 @@ class GraphConvBinaryClassifier(nn.Module):
         g.ndata['h'] = h
         hg = dgl.mean_nodes(g, 'h')
 
-        # Fully connected output layer
-        out = self.fc(hg)
+        # Fully connected output layers
+        h = F.relu(self.fc_1(hg))
+        out = self.fc_2(h)
 
         # Save graph embeddings to a text file for each epoch
         with torch.no_grad():
             if embedding_path is not None:
                 f = open(embedding_path+"_graph_embeddings_itr_" + str(itr) + ".txt", "a+")
                 f.write(str(int(label.cpu().numpy()[0][0])) + " ")
+                f.write(str(cg) + " ")
                 np.savetxt(f, hg.cpu().detach().numpy())
                 f.close()
 
@@ -84,12 +87,13 @@ class GatedGraphConvBinaryClassifier(nn.Module):
         # Model layers
         self.conv1 = GatedGraphConv(in_dim, hidden_dim, n_steps=10, n_etypes=1)
         self.conv2 = GatedGraphConv(hidden_dim, hidden_dim, n_steps=10, n_etypes=1)
-        self.fc = nn.Linear(hidden_dim, 1)
+        self.fc_1 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc_2 = nn.Linear(hidden_dim, 1)
         self.out_act = nn.Sigmoid()
 
         self.use_cuda = use_cuda
 
-    def forward(self, g, itr=None, label=None, embedding_path=None):
+    def forward(self, g, itr=None, label=None, cg=None, embedding_path=None):
         """
         Forward path of classifier
         Parameter:
@@ -110,13 +114,15 @@ class GatedGraphConvBinaryClassifier(nn.Module):
         hg = dgl.mean_nodes(g, 'h')
 
         # Fully connected output layer
-        out = self.fc(hg)
+        h = F.relu(self.fc_1(hg))
+        out = self.fc_2(h)
 
         # Save graph embeddings to a text file for each epoch
         with torch.no_grad():
             if embedding_path is not None:
                 f = open(embedding_path+"_graph_embeddings_itr_" + str(itr) + ".txt", "a+")
                 f.write(str(int(label.cpu().numpy()[0][0])) + " ")
+                f.write(str(cg) + " ")
                 np.savetxt(f, hg.cpu().detach().numpy())
                 f.close()
 
@@ -140,12 +146,13 @@ class SimpleGraphConvBinaryClassifier(nn.Module):
         # Model layers
         self.conv1 = SGConv(in_dim, hidden_dim)
         self.conv2 = SGConv(hidden_dim, hidden_dim)
-        self.fc = nn.Linear(hidden_dim, 1)
+        self.fc_1 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc_2 = nn.Linear(hidden_dim, 1)
         self.out_act = nn.Sigmoid()
 
         self.use_cuda = use_cuda
 
-    def forward(self, g, itr=None, label=None, embedding_path=None):
+    def forward(self, g, itr=None, label=None, cg=None, embedding_path=None):
         """
         Forward path of classifier
         Parameter:
@@ -166,14 +173,15 @@ class SimpleGraphConvBinaryClassifier(nn.Module):
         hg = dgl.mean_nodes(g, 'h')
 
         # Fully connected output layer
-        out = self.fc(hg)
+        h = F.relu(self.fc_1(hg))
+        out = self.fc_2(h)
 
         # Save graph embeddings to a text file for each epoch
         with torch.no_grad():
             if embedding_path is not None:
                 f = open(embedding_path+"_graph_embeddings_itr_" + str(itr) + ".txt", "a+")
                 f.write(str(int(label.cpu().numpy()[0][0])) + " ")
-
+                f.write(str(cg) + " ")
                 np.savetxt(f, hg.cpu().detach().numpy())
                 f.close()
 
@@ -199,12 +207,13 @@ class GraphAttConvBinaryClassifier(nn.Module):
         # Model layers
         self.conv1 = GATConv(in_dim, hidden_dim, num_heads=1, feat_drop=feat_drop, attn_drop=attn_drop)
         self.conv2 = GATConv(hidden_dim, hidden_dim, num_heads=1, feat_drop=feat_drop, attn_drop=attn_drop)
-        self.fc = nn.Linear(hidden_dim, 1)
+        self.fc_1 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc_2 = nn.Linear(hidden_dim, 1)
         self.out_act = nn.Sigmoid()
 
         self.use_cuda = use_cuda
 
-    def forward(self, g, itr=None, label=None, embedding_path=None):
+    def forward(self, g, itr=None, label=None, cg=None, embedding_path=None):
         """
         Forward path of classifier
         Parameter:
@@ -225,13 +234,15 @@ class GraphAttConvBinaryClassifier(nn.Module):
         hg = dgl.mean_nodes(g, 'h')[0]
 
         # Fully connected output layer
-        out = self.fc(hg)
+        h = F.relu(self.fc_1(hg))
+        out = self.fc_2(h)
 
         # Save graph embeddings to a text file for each epoch
         with torch.no_grad():
             if embedding_path is not None:
                 f = open(embedding_path+"_graph_embeddings_itr_" + str(itr) + ".txt", "a+")
                 f.write(str(int(label.cpu().numpy()[0][0])) + " ")
+                f.write(str(cg) + " ")
                 np.savetxt(f, hg.cpu().detach().numpy())
                 f.close()
 
@@ -257,12 +268,13 @@ class GraphSageBinaryClassifier(nn.Module):
         # Model layers
         self.conv1 = SAGEConv(in_dim, hidden_dim, aggregator_type=aggregator_type, feat_drop=feat_drop)
         self.conv2 = SAGEConv(hidden_dim, hidden_dim, aggregator_type=aggregator_type, feat_drop=feat_drop)
-        self.fc = nn.Linear(hidden_dim, 1)
+        self.fc_1 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc_2 = nn.Linear(hidden_dim, 1)
         self.out_act = nn.Sigmoid()
 
         self.use_cuda = use_cuda
 
-    def forward(self, g, itr=None, label=None, embedding_path=None):
+    def forward(self, g, itr=None, label=None, cg=None, embedding_path=None):
         """
         Forward path of classifier
         Parameter:
@@ -283,13 +295,15 @@ class GraphSageBinaryClassifier(nn.Module):
         hg = dgl.mean_nodes(g, 'h')
 
         # Fully connected output layer
-        out = self.fc(hg)
+        h = F.relu(self.fc_1(hg))
+        out = self.fc_2(h)
 
         # Save graph embeddings to a text file for each epoch
         with torch.no_grad():
             if embedding_path is not None:
                 f = open(embedding_path+"_graph_embeddings_itr_" + str(itr) + ".txt", "a+")
                 f.write(str(int(label.cpu().numpy()[0][0])) + " ")
+                f.write(str(cg) + " ")
                 np.savetxt(f, hg.cpu().detach().numpy())
                 f.close()
 
@@ -313,12 +327,13 @@ class ChebConvBinaryClassifier(nn.Module):
         # Model layers
         self.conv1 = ChebConv(in_dim, hidden_dim, k=5)
         self.conv2 = ChebConv(hidden_dim, hidden_dim, k=5)
-        self.fc = nn.Linear(hidden_dim, 1)
+        self.fc_1 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc_2 = nn.Linear(hidden_dim, 1)
         self.out_act = nn.Sigmoid()
 
         self.use_cuda = use_cuda
 
-    def forward(self, g, itr=None, label=None, embedding_path=None):
+    def forward(self, g, itr=None, label=None, cg=None, embedding_path=None):
         """
         Forward path of classifier
         Parameter:
@@ -339,13 +354,15 @@ class ChebConvBinaryClassifier(nn.Module):
         hg = dgl.mean_nodes(g, 'h')
 
         # Fully connected output layer
-        out = self.fc(hg)
+        h = F.relu(self.fc_1(hg))
+        out = self.fc_2(h)
 
         # Save graph embeddings to a text file for each epoch
         with torch.no_grad():
             if embedding_path is not None:
                 f = open(embedding_path+"_graph_embeddings_itr_" + str(itr) + ".txt", "a+")
                 f.write(str(int(label.cpu().numpy()[0][0])) + " ")
+                f.write(str(cg) + " ")
                 np.savetxt(f, hg.cpu().detach().numpy())
                 f.close()
 
