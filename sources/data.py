@@ -21,6 +21,162 @@ except ImportError:
 logger = logging.getLogger('gnn_prostate_cancer')
 
 
+def random_distance_extractor(k,
+                              input_mat_file,
+                              data_label='data_train',
+                              n_jobs=5,
+                              rows_per_matrix=10,
+                              num_cores=100,
+                              output_file_path="./dist.txt",
+                              fft=False,
+                              pca_components=None):
+    """
+    Create an adjacency matrix with distances and save the distances inside a text file.
+    Number of saved values is calculated as: (k-1)*rows_per_matrix
+        features (numpy array of node features): array of size N*M (N nodes, M feature size)
+        k (int): number of neighbours to find
+        n_jobs (int): number of jobs to deploy if GPU is not used
+        algorithm (str): Choose between auto, ball_tree, kd_tree or brute
+        rows_per_matrix (int): indicates how many rows are randomly chosen to get their distance values
+        num_cores (int): Number of cores to extract the distances from
+        data_label (str): String indicating what the data is labelled as in the mat file
+        fft (bool): Indicates whether the fft mat file is inputted
+        pca_components (int): Indicates the number of components in the PCA reduction (no pca if not set)
+    """
+
+    # Load the .mat file
+    prostate_cancer_mat_data = h5py.File(input_mat_file, 'r')
+    mat_data = prostate_cancer_mat_data[data_label]
+
+    # Randomly choose cores
+    n_cores = mat_data.shape[0]
+    random_core_idx = random.sample(range(0, n_cores), num_cores)
+
+    for idx in random_core_idx:
+
+        if fft:
+            # Use the second half of each FFT signal
+            data = np.array(prostate_cancer_mat_data[mat_data[idx * 2 + 1, 0]][()].transpose()[:, 0:100:2])
+            data = np.sqrt(np.power(data['real'], 2) + np.power(data['imag'], 2), dtype=np.float32)
+        else:
+            # Obtain the core signals and change them into a numpy array
+            data = np.array(prostate_cancer_mat_data[mat_data[idx, 0]][()].transpose(), dtype=np.float32)
+
+        # Perform PCA reduction
+        if pca_components:
+            pca = PCA(n_components=pca_components)
+            pca.fit(data)
+            data = pca.transform(data)
+
+        # initialize and fit nearest neighbour algorithm
+        neigh = NearestNeighbors(n_neighbors=k, n_jobs=n_jobs, algorithm='auto')
+        neigh.fit(data)
+
+        # Obtain matrix with distance of k-nearest points
+        adj_mat_weighted = np.array(sp.coo_matrix(neigh.kneighbors_graph(data,
+                                                                         k,
+                                                                         mode='distance')).toarray())
+
+        # Choose random rows per core
+        random_rows = random.sample(range(0, adj_mat_weighted.shape[0]), rows_per_matrix)
+
+        # Extract the distance
+        dist = adj_mat_weighted[random_rows][np.nonzero(adj_mat_weighted[random_rows])].flatten()
+
+        # Save to file
+        f = open(output_file_path, "a")
+        for ele in dist:
+            f.write(str(ele) + "\n")
+        f.close()
+
+
+def plot_graph_embeddings(path_to_file, num_itr, path_to_output, figure_title, cg=True, show_cg_on_figure=False):
+
+    """
+    Performs TSNE on input graph embeddings and plots them (saves the figure)
+    Parameters:
+        path_to_file (str): path to text file containing graph embeddings (the last letter in the name should correspond
+        to the iteration) (example: "D/embeddings_itr_")
+        num_itr (int): number of iterations
+        path_to_output (str): the output path to save the figures to
+        cg (bool): Indicates whether cancer grade should be shown in the figures
+        figure_title (str): figure title (itr number will be appended to this)
+        show_cg_on_figure (bool): Indicates whether each point is annotated with its cg label (only a legend otherwise)
+    """
+
+    for itr in range(num_itr):
+
+        x = np.genfromtxt(path_to_file+str(itr)+".txt",
+                          delimiter=' ',
+                          dtype=np.float)
+
+        # Extract labels and embeddings
+        if cg:
+            labels = x[:, 0]
+            x = x[:, 2:]
+
+            cg_labels = np.genfromtxt(path_to_file + str(itr) + ".txt",
+                                      delimiter=' ',
+                                      dtype=str)[:, 1]
+
+            x = np.delete(x, 0, axis=1)
+        else:
+            labels = x[:, 0]
+            x = x[:, 1:]
+
+        # Perform TSNE reduction
+        x_embedded = TSNE(n_components=2, random_state=5).fit_transform(x)
+
+        if cg:
+
+            # Colours dictionary
+            cdict = {"['-']": "green",
+                     "['1+1']": "green",
+                     "['1+2']": "green",
+                     "['2+1']": "green",
+                     "['2+2']": "green",
+                     "['2+3']": "green",
+                     "['3+2']": "green",
+                     "['3+3']": "pink",
+                     "['3+4']": "orange",
+                     "['4+3']": "purple",
+                     "['4+4']": "olive",
+                     "['4+5']": "red",
+                     "['5+4']": "blue",
+                     "['5+5']": "cyan"
+                     }
+
+            fig, ax = plt.subplots()
+
+            for cgl in np.unique(cg_labels):
+                color = cdict[cgl]
+                indices = np.where(cg_labels == cgl)[0]
+                ax.scatter(x_embedded[indices, 0], x_embedded[indices, 1], c=color, label=cgl)
+
+            # Show CG labels for each scatter point
+            if show_cg_on_figure:
+                for j, (x, y) in enumerate(zip(x_embedded[:, 0], x_embedded[:, 1])):
+                    if labels[j] == 1:
+                        plt.annotate(cg_labels[j],  # this is the text
+                                     (x, y),  # this is the point to label
+                                     textcoords="offset points",  # how to position the text
+                                     xytext=(0, 10),  # distance from text to points (x,y)
+                                     ha='center')  # horizontal alignment can be left, right or center
+
+            ax.legend()
+            ax.grid(True)
+
+        else:
+            color = ['green' if l == 0 else 'red' for l in labels]
+
+            # Draw the scatter plot with the created colors
+            plt.scatter(x_embedded[:, 0], x_embedded[:, 1], c=color)
+
+        plt.title( figure_title+str(itr))
+        plt.savefig(path_to_output+str(itr))
+        plt.close()
+
+
 def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto', threshold=None, use_gpu=False):
     """
     Create a directed normalized adjacency matrix from input nodes based on k-nearest neighbours
@@ -157,36 +313,6 @@ def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto
         logger.debug("it took {} to create the graph".format(t_end - t_start))
 
         return sp.coo_matrix(adj_mat_binary)
-
-
-def random_distance_extractor(features, k, n_jobs=None, algorithm='auto', rows_per_matrix=10, file_path="./dist.txt"):
-    """
-    Create an adjacency matrix with distances and save the distances inside a text file.
-    Number of saved values is calculated as: (k-1)*rows_per_matrix
-        features (numpy array of node features): array of size N*M (N nodes, M feature size)
-        k (int): number of neighbours to find
-        n_jobs (int): number of jobs to deploy if GPU is not used
-        algorithm (str): Choose between auto, ball_tree, kd_tree or brute
-        rows_per_matrix (int): indicates how many rows are randomly chosen to get their distance values
-    """
-
-    # initialize and fit nearest neighbour algorithm
-    neigh = NearestNeighbors(n_neighbors=k, n_jobs=n_jobs, algorithm=algorithm)
-    neigh.fit(features)
-
-    # Obtain matrix with distance of k-nearest points
-    adj_mat_weighted = np.array(sp.coo_matrix(neigh.kneighbors_graph(features,
-                                                                     k,
-                                                                     mode='distance')).toarray())
-
-    random_rows = random.sample(range(0, adj_mat_weighted.shape[0]), rows_per_matrix)
-
-    dist = adj_mat_weighted[random_rows][np.nonzero(adj_mat_weighted[random_rows])].flatten()
-
-    f = open(file_path, "a")
-    for ele in dist:
-        f.write(str(ele) + "\n")
-    f.close()
 
 
 def draw_graph(adj_mat, label, idx, weighted=False, directed=False):
@@ -440,50 +566,23 @@ class ProstateCancerDataset(Dataset):
 
 def main():
     print("this is main")
-    # Load the .mat file
-    # prostate_cancer_mat_data = h5py.File("../data/BK_RF_P91_110.mat", 'r')
-    # mat_data = prostate_cancer_mat_data["data"]
-    #
-    # prostate_cancer_fft_mat_data = h5py.File("../data/BK_RF_FFT_resmp_2_100_P91_110.mat", 'r')
-    # mat_fft_data = prostate_cancer_fft_mat_data['FFT_train']
-    #
-    # labels = np.array(prostate_cancer_mat_data['label'], dtype=np.int)
-    #
-    # num_cores = mat_data.shape[0]
-    #
-    # random_core_idx = random.sample(range(0, num_cores), 100)
-    #
-    # for idx in random_core_idx:
-    #     # Obtain the label for the specified core
-    #     label = labels[idx][0]
-    #
-    #     # Obtain the core signals and change them into a numpy array
-    #     # data = np.array(prostate_cancer_mat_data[mat_data[idx, 0]][()].transpose(), dtype=np.float32)
-    #
-    #     # Use the second half of each FFT signal
-    #     freq_data = np.array(prostate_cancer_fft_mat_data[mat_fft_data[idx * 2 + 1, 0]][()].transpose()[:, 0:100:2])
-    #     freq_data = np.sqrt(np.power(freq_data['real'], 2) + np.power(freq_data['imag'], 2), dtype=np.float32)
-    #
-    #     pca = PCA(n_components=50)
-    #     pca.fit(freq_data)
-    #     reduced_data = pca.transform(freq_data)
-    #
-    #     random_distance_extractor(features=freq_data, k=50, rows_per_matrix=10, n_jobs=5)
 
+    random_distance_extractor(k=40,
+                              input_mat_file="D:/Workplace/ML/Repositories/prostate_cancer_gnn/data/BK_RF_P1_90_MICCAI_33.mat",
+                              data_label='data_train',
+                              n_jobs=5,
+                              rows_per_matrix=10,
+                              num_cores=100,
+                              output_file_path='D:/Workplace/ML/Documents/distance.txt',
+                              fft=False,
+                              pca_components=50)
 
-    # Plot embeddings after TSNE
-    for i in range(210):
-        x = np.loadtxt("D:/Workplace/ML/Documents/sg_13-4train_graph_embeddings_itr_"+str(i)+".txt", delimiter=" ")
-
-        labels = x[:, 0]
-        x = np.delete(x, 0, axis=1)
-        x_embedded = TSNE(n_components=2, random_state=5).fit_transform(x)
-        colors = ['green' if l == 0 else 'red' for l in labels]
-        plt.scatter(x_embedded[:, 0], x_embedded[:, 1], color=colors)
-        plt.title("SGConv-13-4  -- itr: "+str(i))
-        plt.savefig("./SGConv-test-13-4_itr_"+str(i))
-        plt.close()
-
+    plot_graph_embeddings(path_to_file="D:/Workplace/ML/Documents/graphsage_12-4train_graph_embeddings_itr_",
+                          num_itr=100,
+                          path_to_output="./graphsage_12-4_itr_",
+                          figure_title="graphsage_12-4 -- itr ",
+                          cg=True,
+                          show_cg_on_figure=False)
 
 if __name__ == "__main__":
     main()
