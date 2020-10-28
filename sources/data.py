@@ -565,7 +565,6 @@ class ProstateCancerDataset(Dataset):
 
 
 def main():
-    print("this is main")
 
     random_distance_extractor(k=40,
                               input_mat_file="D:/Workplace/ML/Repositories/prostate_cancer_gnn/data/BK_RF_P1_90_MICCAI_33.mat",
