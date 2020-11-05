@@ -315,6 +315,193 @@ def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto
         return sp.coo_matrix(adj_mat_binary)
 
 
+def create_graph_for_node_classification(mat_file_path,
+                                         fft_mat_file_path,
+                                         test_mat_file_path,
+                                         test_fft_mat_file_path,
+                                         weighted=False,
+                                         k=10,
+                                         knn_n_jobs=1,
+                                         cuda_knn=False,
+                                         threshold=None,
+                                         perform_pca=False,
+                                         num_pca_components=None,
+                                         get_cancer_grade=False,
+                                         train_cancer_grade_string='GS_train',
+                                         train_data_string='data_train',
+                                         train_label_string='label_train',
+                                         train_fft_data_string='data_train',
+                                         val_cancer_grade_string='GS_val',
+                                         val_data_string='data_val',
+                                         val_label_string='label_val',
+                                         val_fft_data_string='data_val',
+                                         test_cancer_grade_string='GS',
+                                         test_data_string='data',
+                                         test_label_string='label',
+                                         test_fft_data_string='FFT_train'):
+    # Load the .mat file
+    prostate_cancer_mat_data = h5py.File(mat_file_path, 'r')
+    test_prostate_cancer_mat_data = h5py.File(test_mat_file_path, 'r')
+
+    # Load either the test or train data
+    train_mat_data = prostate_cancer_mat_data[train_data_string]
+    val_mat_data = prostate_cancer_mat_data[val_data_string]
+    test_mat_data = test_prostate_cancer_mat_data[test_data_string]
+
+    # Get total number of cores (nodes)
+    train_cores_num = train_mat_data.shape[0]
+    val_cores_num = val_mat_data.shape[0]
+    test_cores_num = test_mat_data.shape[0]
+    num_cores = train_cores_num + val_cores_num + test_cores_num
+
+    # Create masks
+    trainmsk = np.zeros(num_cores, dtype=np.int)
+    valmsk = np.zeros(num_cores, dtype=np.int)
+    testmsk = np.zeros(num_cores, dtype=np.int)
+    trainmsk[range(train_cores_num)] = 1
+    valmsk[range(train_cores_num, train_cores_num + val_cores_num)] = 1
+    testmsk[range(train_cores_num + val_cores_num, train_cores_num + val_cores_num + test_cores_num)] = 1
+    trainmsk = torch.tensor(trainmsk > 0)
+    valmsk = torch.tensor(valmsk > 0)
+    testmsk = torch.tensor(testmsk > 0)
+
+    use_fft_data = False
+
+    # Use frequency domain data if provided
+    if fft_mat_file_path:
+        use_fft_data = True
+        prostate_cancer_fft_mat_data = h5py.File(fft_mat_file_path, 'r')
+        test_prostate_cancer_fft_mat_data = h5py.File(test_fft_mat_file_path, 'r')
+        train_mat_fft_data = prostate_cancer_fft_mat_data[train_fft_data_string]
+        val_mat_fft_data = prostate_cancer_fft_mat_data[val_fft_data_string]
+        test_mat_fft_data = test_prostate_cancer_fft_mat_data[test_fft_data_string]
+
+    # Obtain the labels for the cores
+    train_labels = np.array(prostate_cancer_mat_data[train_label_string], dtype=np.float)
+    val_labels = np.array(prostate_cancer_mat_data[val_label_string], dtype=np.float)
+    test_labels = np.array(test_prostate_cancer_mat_data[test_label_string], dtype=np.float)
+    labels = np.concatenate((train_labels, val_labels, test_labels)).reshape((-1, 1))
+
+    train_cgs = list()
+    val_cgs = list()
+    test_cgs = list()
+    cgs = None
+    if get_cancer_grade:
+        for idx in range(train_cores_num):
+            cg = prostate_cancer_mat_data[train_cancer_grade_string]
+            cg = prostate_cancer_mat_data[cg[idx][0]]
+            cg = ''.join(chr(i) for i in cg)
+            train_cgs.append(cg)
+
+        for idx in range(val_cores_num):
+            cg = prostate_cancer_mat_data[val_cancer_grade_string]
+            cg = prostate_cancer_mat_data[cg[idx][0]]
+            cg = ''.join(chr(i) for i in cg)
+            val_cgs.append(cg)
+
+        for idx in range(test_cores_num):
+            cg = test_prostate_cancer_mat_data[test_cancer_grade_string]
+            cg = test_prostate_cancer_mat_data[cg[idx][0]]
+            cg = ''.join(chr(i) for i in cg)
+            test_cgs.append(cg)
+        cgs = np.concatenate((train_cgs, val_cgs, test_cgs))
+
+    # Determine the used device
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    # Obtain the core signals and change them into a numpy array
+    cores_data = list()
+    for idx in range(train_cores_num):
+        cores_data.append(np.mean(prostate_cancer_mat_data[train_mat_data[idx, 0]][()], axis=1))
+    for idx in range(val_cores_num):
+        cores_data.append(np.mean(prostate_cancer_mat_data[val_mat_data[idx, 0]][()], axis=1))
+    for idx in range(test_cores_num):
+        cores_data.append(np.mean(test_prostate_cancer_mat_data[test_mat_data[idx, 0]][()], axis=1))
+    cores_data = np.array(cores_data, dtype=np.float32)
+
+    # Perform PCA on time domain data (To be used as node features)
+    if perform_pca:
+        t_start = datetime.now()
+        pca = PCA(n_components=num_pca_components)
+        pca.fit(cores_data)
+        reduced_data = pca.transform(cores_data)
+        t_end = datetime.now()
+        logger.debug("PCA Reduction for RF data took {}".format(t_end - t_start))
+
+    # Create the graph using the FFT data
+    cores_freq_data = list()
+    if use_fft_data:
+        for idx in range(train_cores_num):
+            # Use the second half of each FFT signal
+            freq_data = np.array(prostate_cancer_fft_mat_data[train_mat_fft_data[idx*2+1, 0]][()].transpose())
+            freq_data = np.sqrt(np.power(freq_data['real'], 2) + np.power(freq_data['imag'], 2), dtype=np.float32)
+            cores_freq_data.append(np.mean(freq_data, axis=0))
+        for idx in range(val_cores_num):
+            # Use the second half of each FFT signal
+            freq_data = np.array(prostate_cancer_fft_mat_data[val_mat_fft_data[idx*2+1, 0]][()].transpose())
+            freq_data = np.sqrt(np.power(freq_data['real'], 2) + np.power(freq_data['imag'], 2), dtype=np.float32)
+            cores_freq_data.append(np.mean(freq_data, axis=0))
+        for idx in range(test_cores_num):
+            # Use the second half of each FFT signal
+            freq_data = np.array(test_prostate_cancer_fft_mat_data[test_mat_fft_data[idx*2+1, 0]][()].transpose())
+            freq_data = np.sqrt(np.power(freq_data['real'], 2) + np.power(freq_data['imag'], 2), dtype=np.float32)
+            cores_freq_data.append(np.mean(freq_data, axis=0)[50:100])
+        cores_freq_data = np.vstack(cores_freq_data)
+
+        # Perform PCA on FFT data
+        if perform_pca:
+            t_start = datetime.now()
+            pca = PCA(n_components=num_pca_components)
+            pca.fit(cores_freq_data)
+            reduced_freq_data = pca.transform(cores_freq_data)
+            t_end = datetime.now()
+            logger.debug("PCA Reduction for FFT data took {}".format(t_end - t_start))
+
+            # Create the graph using reduced FFT data
+            graph = create_knn_adj_mat(reduced_freq_data,
+                                       k=k,
+                                       weighted=weighted,
+                                       n_jobs=knn_n_jobs,
+                                       threshold=threshold,
+                                       use_gpu=cuda_knn)
+        else:
+            # Create the graph using FFT data
+            graph = create_knn_adj_mat(cores_freq_data,
+                                       k=k,
+                                       weighted=weighted,
+                                       n_jobs=knn_n_jobs,
+                                       threshold=threshold,
+                                       use_gpu=cuda_knn)
+    else:
+        if perform_pca:
+            # noinspection PyUnboundLocalVariable
+            graph = create_knn_adj_mat(reduced_data,
+                                       k=k,
+                                       weighted=weighted,
+                                       n_jobs=knn_n_jobs,
+                                       threshold=threshold,
+                                       use_gpu=cuda_knn)
+        else:
+            graph = create_knn_adj_mat(cores_data,
+                                       k=k,
+                                       weighted=weighted,
+                                       n_jobs=knn_n_jobs,
+                                       threshold=threshold,
+                                       use_gpu=cuda_knn)
+
+    # Create a dgl graph from coo_matrix
+    g = dgl.DGLGraph()
+    g.from_scipy_sparse_matrix(graph)
+
+    # Put time domain signals as node features
+    if perform_pca:
+        g.nodes[:].data['x'] = torch.from_numpy(reduced_data).to(device)
+    else:
+        g.nodes[:].data['x'] = torch.from_numpy(cores_data).to(device)
+
+    return g, labels, cgs, trainmsk, valmsk, testmsk
+
+
 def draw_graph(adj_mat, label, idx, weighted=False, directed=False):
     """
     Plots the graph for a weighted adjacency matrix
@@ -566,20 +753,20 @@ class ProstateCancerDataset(Dataset):
 
 def main():
 
-    random_distance_extractor(k=40,
-                              input_mat_file="D:/Workplace/ML/Repositories/prostate_cancer_gnn/data/BK_RF_P1_90_MICCAI_33.mat",
-                              data_label='data_train',
-                              n_jobs=5,
-                              rows_per_matrix=10,
-                              num_cores=100,
-                              output_file_path='D:/Workplace/ML/Documents/distance.txt',
-                              fft=False,
-                              pca_components=50)
+    # random_distance_extractor(k=40,
+    #                           input_mat_file="D:/Workplace/ML/Repositories/prostate_cancer_gnn/data/BK_RF_P1_90_MICCAI_33.mat",
+    #                           data_label='data_train',
+    #                           n_jobs=5,
+    #                           rows_per_matrix=10,
+    #                           num_cores=100,
+    #                           output_file_path='D:/Workplace/ML/Documents/distance.txt',
+    #                           fft=False,
+    #                           pca_components=50)
 
-    plot_graph_embeddings(path_to_file="D:/Workplace/ML/Documents/graphsage_12-4train_graph_embeddings_itr_",
-                          num_itr=100,
-                          path_to_output="./graphsage_12-4_itr_",
-                          figure_title="graphsage_12-4 -- itr ",
+    plot_graph_embeddings(path_to_file="D:/Workplace/ML/Documents/Train History/graphsage_12-4-3fdtest_graph_embeddings_itr_",
+                          num_itr=365,
+                          path_to_output="./graphsage_12-4_3fd_test_itr_",
+                          figure_title="graphsage_12-4 fd:0.3 test -- itr ",
                           cg=True,
                           show_cg_on_figure=False)
 

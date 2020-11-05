@@ -1,4 +1,4 @@
-from dgl.nn.pytorch import GraphConv
+from dgl.nn import GraphConv
 from dgl.nn.pytorch import SGConv
 from dgl.nn.pytorch import GatedGraphConv
 from dgl.nn.pytorch import ChebConv
@@ -9,6 +9,46 @@ import torch.nn as nn
 import numpy as np
 import dgl
 import torch
+
+
+class GraphConvBinaryNodeClassifier(nn.Module):
+    """
+    Classification model for the prostate cancer dataset using GCN
+    """
+    def __init__(self, in_dim, hidden_dim, num_classes=2, use_cuda=False):
+        """
+        Constructor for the GraphConvBinaryClassifier class
+        Parameters:
+            in_dim (int): Dimension of features for each node
+            hidden_dim (int): Dimension of hidden embeddings
+            use_cuda (bool): Indicates whether GPU should be utilized or not
+            num_classes (int): Number of output classes
+        """
+        super(GraphConvBinaryNodeClassifier, self).__init__()
+
+        # Model layers
+        self.conv1 = SAGEConv(in_dim, hidden_dim, feat_drop=0.3, aggregator_type='mean')
+        self.conv2 = SAGEConv(hidden_dim, num_classes, feat_drop=0.3, aggregator_type='mean')
+
+        self.use_cuda = use_cuda
+
+    def forward(self, g):
+        """
+        Forward path of classifier
+        Parameter:
+            g (DGL Graph): Input graph
+        """
+        # Use RF signals as node features
+        h = g.ndata['x']
+
+        if self.use_cuda:
+            h = h.cuda()
+
+        # Two layers of Graph Convolution
+        h = F.relu(self.conv1(g, h))
+        h = self.conv2(g, h)
+
+        return h
 
 
 class GraphConvBinaryClassifier(nn.Module):
