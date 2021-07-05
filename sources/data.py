@@ -562,7 +562,7 @@ def collate(samples):
     """
     graphs, labels, cg = map(list, zip(*samples))
     batched_graph = dgl.batch(graphs)
-    return batched_graph, torch.reshape(torch.tensor(labels, dtype=torch.float), [-1, 1]), cg
+    return batched_graph, torch.tensor(labels, dtype=torch.float), cg
 
 
 class ProstateCancerDataset(Dataset):
@@ -570,31 +570,29 @@ class ProstateCancerDataset(Dataset):
     Dataset class for the prostate cancer dataset
     """
 
-    def __init__(self, mat_file_path,
-                 fft_mat_file_path=None,
-                 train=True,
+    def __init__(self,
+                 mat_file_path,
+                 mode='train',
                  weighted=False,
                  k=10,
                  knn_n_jobs=1,
                  cuda_knn=False,
                  threshold=None,
                  perform_pca=False,
-                 num_pca_components=None,
-                 get_cancer_grade=False,
-                 cancer_grade_string='GS_train',
+                 num_pca_components=50,
+                 cancer_grade_string=None,
                  train_data_string='data_train',
                  test_data_string='data_test',
-                 train_fft_data_string='data_train',
-                 test_fft_data_string='data_test',
-                 train_data_label_string='label_train',
-                 test_data_label_string='label_test'
+                 val_data_string='data_val',
+                 train_label_string='label_train',
+                 test_label_string='label_test',
+                 val_label_string='label_val'
                  ):
         """
         Constructor for the prostate cancer dataset class
         Parameters:
-            mat_file_path (str): Path to the time domain .mat file
-            fft_mat_file_path (str): Path to the frequency domain .mat file
-            train (bool): Indicates whether train or test data is loaded
+            mat_file_path (str): Path to the time series .mat file
+            mode (str): Indicates whether 'train', 'test' or 'val' data is loaded
             weighted (bool): Indicates whether created graph is weighted or not
             k (int): Number of neighbours to use for the K-nearest neighbour algorithm
             knn_n_jobs (int): Number of jobs to deploy for graph creation in CPU mode
@@ -603,40 +601,38 @@ class ProstateCancerDataset(Dataset):
                                valid when weighted is set to True)
             perform_pca (bool): Indicates whether PCA dimension reduction is performed on data or not
             num_pca_components (int): Indicates the number of components for PCA
-            get_cancer_grade (bool): Indicates whether cancer grade is to be extracted from the mat file
-            train_data_string (str): String associated with cancer grade in the mat file
+            cancer_grade_string (str): String associated with cancer grade in the mat file
             train_data_string (str): If train data string is anything other than data_train, specify it
             test_data_string (str): If test data string is anything other than data_test, specify it
-            train_fft_data_string (str): If train data string is anything other than data_train, specify it
-            test_fft_data_string (str): If test data string is anything other than data_test, specify it
-            train_data_label_string (str): If train data string is anything other than data_train, specify it
-            test_data_label_string (str): If test data string is anything other than data_test, specify it
+            val_data_string (str): If validation data string is anything other than data_val, specify it
+            train_label_string (str): If train data string is anything other than data_train, specify it
+            test_label_string (str): If test data string is anything other than data_test, specify it
+            val_label_string (str): If validation data string is anything other than data_val, specify it
         """
 
         # Load the .mat file
         self.prostate_cancer_mat_data = h5py.File(mat_file_path, 'r')
 
-        # Load either the test or train data
-        self.mat_data = self.prostate_cancer_mat_data[train_data_string if train else test_data_string]
-
-        self.use_fft_data = False
-
-        # Use frequency domain data if provided
-        if fft_mat_file_path:
-            self.use_fft_data = True
-            self.prostate_cancer_fft_mat_data = h5py.File(fft_mat_file_path, 'r')
-            self.mat_fft_data = self.prostate_cancer_fft_mat_data[
-                train_fft_data_string if train else test_fft_data_string]
+        # Load either the test, train or val data
+        assert mode in ['train', 'val', 'test'], 'Invalid mode selected for dataset.'
+        if mode is 'train':
+            self.mat_data = self.prostate_cancer_mat_data[train_data_string]
+            self.labels = np.array(self.prostate_cancer_mat_data[train_label_string], dtype=np.int8)
+        elif mode is 'test':
+            self.mat_data = self.prostate_cancer_mat_data[test_data_string]
+            self.labels = np.array(self.prostate_cancer_mat_data[test_label_string], dtype=np.int8)
+        else:
+            self.mat_data = self.prostate_cancer_mat_data[val_data_string]
+            self.labels = np.array(self.prostate_cancer_mat_data[val_label_string], dtype=np.int8)
 
         # Find the number of available cores
         self.num_cores = self.mat_data.shape[0]
 
-        # Obtain the labels for the cores
-        self.labels = np.array(self.prostate_cancer_mat_data[
-                                   train_data_label_string if train else test_data_label_string], dtype=np.int)
-
-        if get_cancer_grade:
+        # Get the cancer grade
+        self.cg_available = False
+        if cancer_grade_string:
             self.cg = self.prostate_cancer_mat_data[cancer_grade_string]
+            self.cg_available = True
 
         # Parameters used in graph creation
         self.weighted = weighted
@@ -646,11 +642,10 @@ class ProstateCancerDataset(Dataset):
         self.cuda_knn = cuda_knn
 
         # Other variables
-        self.train = train
+        self.mode = mode
         self.perform_pca = perform_pca
         self.num_pca_components = num_pca_components
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        self.get_cancer_grade = get_cancer_grade
 
     def __getitem__(self, idx):
         """
@@ -661,15 +656,13 @@ class ProstateCancerDataset(Dataset):
             (numpy array): Numpy array containing the signals for a single core
             (int): Label indicating whether the core is cancerous or healthy
         """
-        if idx is 45:
-            idx = 46
 
         # Obtain the label for the specified core
         label = self.labels[idx][0]
 
         # Obtain the cancer grade
         cg = None
-        if self.get_cancer_grade:
+        if self.cg_available:
             cg = self.prostate_cancer_mat_data[self.cg[idx][0]]
             cg = ''.join(chr(i) for i in cg)
 
@@ -685,52 +678,21 @@ class ProstateCancerDataset(Dataset):
             t_end = datetime.now()
             logger.debug("PCA Reduction for RF data took {}".format(t_end - t_start))
 
-        # Create the graph using the FFT data
-        if self.use_fft_data:
-            # Use the second half of each FFT signal
-            freq_data = np.array(self.prostate_cancer_fft_mat_data[self.mat_fft_data[idx*2+1, 0]][()].transpose())
-            freq_data = np.sqrt(np.power(freq_data['real'], 2) + np.power(freq_data['imag'], 2), dtype=np.float32)
-
-            # Perform PCA on FFT data
-            if self.perform_pca:
-                t_start = datetime.now()
-                pca = PCA(n_components=self.num_pca_components)
-                pca.fit(freq_data)
-                reduced_freq_data = pca.transform(freq_data)
-                t_end = datetime.now()
-                logger.debug("PCA Reduction for FFT data took {}".format(t_end - t_start))
-
-                # Create the graph using reduced FFT data
-                graph = create_knn_adj_mat(reduced_freq_data,
-                                           k=self.k,
-                                           weighted=self.weighted,
-                                           n_jobs=self.knn_n_jobs,
-                                           threshold=self.threshold,
-                                           use_gpu=self.cuda_knn)
-            else:
-                # Create the graph using FFT data
-                graph = create_knn_adj_mat(freq_data,
-                                           k=self.k,
-                                           weighted=self.weighted,
-                                           n_jobs=self.knn_n_jobs,
-                                           threshold=self.threshold,
-                                           use_gpu=self.cuda_knn)
+        if self.perform_pca:
+            # noinspection PyUnboundLocalVariable
+            graph = create_knn_adj_mat(reduced_data,
+                                       k=self.k,
+                                       weighted=self.weighted,
+                                       n_jobs=self.knn_n_jobs,
+                                       threshold=self.threshold,
+                                       use_gpu=self.cuda_knn)
         else:
-            if self.perform_pca:
-                # noinspection PyUnboundLocalVariable
-                graph = create_knn_adj_mat(reduced_data,
-                                           k=self.k,
-                                           weighted=self.weighted,
-                                           n_jobs=self.knn_n_jobs,
-                                           threshold=self.threshold,
-                                           use_gpu=self.cuda_knn)
-            else:
-                graph = create_knn_adj_mat(data,
-                                           k=self.k,
-                                           weighted=self.weighted,
-                                           n_jobs=self.knn_n_jobs,
-                                           threshold=self.threshold,
-                                           use_gpu=self.cuda_knn)
+            graph = create_knn_adj_mat(data,
+                                       k=self.k,
+                                       weighted=self.weighted,
+                                       n_jobs=self.knn_n_jobs,
+                                       threshold=self.threshold,
+                                       use_gpu=self.cuda_knn)
 
         # Create a dgl graph from coo_matrix
         g = dgl.from_scipy(graph, device=self.device)
@@ -752,7 +714,7 @@ class ProstateCancerDataset(Dataset):
 
 
 def main():
-
+    print('This is main. nice to meet you.')
     # random_distance_extractor(k=40,
     #                           input_mat_file="D:/Workplace/ML/Repositories/prostate_cancer_gnn/data/BK_RF_P1_90_MICCAI_33.mat",
     #                           data_label='data_train',
@@ -762,13 +724,13 @@ def main():
     #                           output_file_path='D:/Workplace/ML/Documents/distance.txt',
     #                           fft=False,
     #                           pca_components=50)
+    # plot_graph_embeddings(path_to_file="D:/Workplace/ML/Documents/Train History/graphsage_12-4-3fdtest_graph_embeddings_itr_",
+    #                       num_itr=365,
+    #                       path_to_output="./graphsage_12-4_3fd_test_itr_",
+    #                       figure_title="graphsage_12-4 fd:0.3 test -- itr ",
+    #                       cg=True,
+    #                       show_cg_on_figure=False)
 
-    plot_graph_embeddings(path_to_file="D:/Workplace/ML/Documents/Train History/graphsage_12-4-3fdtest_graph_embeddings_itr_",
-                          num_itr=365,
-                          path_to_output="./graphsage_12-4_3fd_test_itr_",
-                          figure_title="graphsage_12-4 fd:0.3 test -- itr ",
-                          cg=True,
-                          show_cg_on_figure=False)
 
 if __name__ == "__main__":
     main()
