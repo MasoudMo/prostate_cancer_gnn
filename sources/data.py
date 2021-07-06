@@ -197,7 +197,7 @@ def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto
 
         features_extra_dim = np.expand_dims(features, axis=2)
 
-        knn = KNN(k=k, transpose_mode=True)
+        knn = KNN(k=k, transpose_mode=False)
 
         # Find the k nearest neighbours and their distance
         dist, idx = knn(torch.from_numpy(features_extra_dim).cuda(), torch.from_numpy(features_extra_dim).clone().cuda())
@@ -615,10 +615,10 @@ class ProstateCancerDataset(Dataset):
 
         # Load either the test, train or val data
         assert mode in ['train', 'val', 'test'], 'Invalid mode selected for dataset.'
-        if mode is 'train':
+        if mode == 'train':
             self.mat_data = self.prostate_cancer_mat_data[train_data_string]
             self.labels = np.array(self.prostate_cancer_mat_data[train_label_string], dtype=np.int8)
-        elif mode is 'test':
+        elif mode == 'test':
             self.mat_data = self.prostate_cancer_mat_data[test_data_string]
             self.labels = np.array(self.prostate_cancer_mat_data[test_label_string], dtype=np.int8)
         else:
@@ -696,6 +696,7 @@ class ProstateCancerDataset(Dataset):
 
         # Create a dgl graph from coo_matrix
         g = dgl.from_scipy(graph, device=self.device)
+        g = dgl.add_self_loop(g)
 
         # Put time domain signals as node features
         if self.perform_pca:

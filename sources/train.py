@@ -16,6 +16,7 @@ from datetime import datetime
 import logging
 import visdom
 import configparser
+import numpy as np
 
 
 logger_level = logging.INFO
@@ -227,8 +228,8 @@ def main():
 
         t_start = datetime.now()
 
-        y_true = []
-        y_score = []
+        y_true = np.empty((0,3))
+        y_score = np.empty((0,3))
 
         # Put model in train model
         model.train()
@@ -240,7 +241,7 @@ def main():
                 torch.cuda.empty_cache()
                 label = label.to(device)
 
-            y_true.append(label.detach())
+            y_true = np.append(y_true, label.cpu().detach().numpy())
 
             # Predict labels
             if embeddings_path is not None:
@@ -254,7 +255,7 @@ def main():
                 prediction = model(bg)
                 prediction = torch.flatten(prediction)
 
-            y_score.append(prediction.detach())
+            y_score = np.append(y_score, prediction.cpu().detach().numpy())
 
             # Compute loss
             loss = loss_func(prediction, label)
@@ -309,8 +310,8 @@ def main():
         t_start = datetime.now()
 
         with torch.no_grad():
-            y_true = []
-            y_score = []
+            y_true = np.empty((0,3))
+            y_score = np.empty((0,3))
             validation_loss = 0
             # noinspection PyUnboundLocalVariable
             for bg, label, cg in val_data_loader:
@@ -319,7 +320,7 @@ def main():
                     torch.cuda.empty_cache()
                     label = label.to(device)
 
-                y_true.append(label.detach())
+                y_true = np.append(y_true, label.cpu().detach().numpy())
 
                 # Predict labels
                 if embeddings_path is not None:
@@ -333,7 +334,7 @@ def main():
                     prediction = model(bg)
                     prediction = torch.flatten(prediction)
 
-                y_score.append(prediction.detach())
+                y_score = np.append(y_score, prediction.cpu().detach().numpy())
 
                 # Compute loss
                 loss = loss_func(prediction, label)
@@ -386,8 +387,8 @@ def main():
         t_start = datetime.now()
 
         with torch.no_grad():
-            y_true = []
-            y_score = []
+            y_true = np.empty((0,3))
+            y_score = np.empty((0,3))
             test_loss = 0
             # noinspection PyUnboundLocalVariable
             for bg, label, cg in test_data_loader:
@@ -396,7 +397,7 @@ def main():
                     torch.cuda.empty_cache()
                     label = label.to(device)
 
-                y_true.append(label.detach().item())
+                y_true = np.append(y_true, label.cpu().detach().numpy())
 
                 # Predict labels
                 if embeddings_path is not None:
@@ -410,7 +411,7 @@ def main():
                     prediction = model(bg)
                     prediction = torch.flatten(prediction)
 
-                y_score.append(prediction.detach())
+                y_score = np.append(y_score, prediction.cpu().detach().numpy())
 
                 # Compute loss
                 loss = loss_func(prediction, label)
