@@ -294,7 +294,7 @@ class GraphSageBinaryClassifier(nn.Module):
     """
     Classification model for the prostate cancer dataset using GraphSage
     """
-    def __init__(self, in_dim, hidden_dim, aggregator_type='mean', feat_drop=0, use_cuda=False, fc_dropout_p=0.3):
+    def __init__(self, in_dim, hidden_dim, aggregator_type='mean', feat_drop=0, use_cuda=False, fc_dropout_p=0.4):
         """
         Constructor for the GraphSageBinaryClassifier class
         Parameters:
@@ -339,7 +339,7 @@ class GraphSageBinaryClassifier(nn.Module):
         h = F.relu(self.conv2(g, h))
 
         # Use the mean of hidden embeddings to find graph embedding
-        hg = self.gap(g, g.ndata['x'])
+        hg = self.gap(g, h)
 
         # Fully connected output layer
         h = F.relu(self.fc_1(hg))
