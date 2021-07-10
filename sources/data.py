@@ -704,6 +704,8 @@ class ProstateCancerDataset(Dataset):
         else:
             g.nodes[:].data['x'] = torch.from_numpy(data).to(self.device)
 
+        g = g.to(self.device)
+
         return g, label, cg
 
     def __len__(self):

@@ -2,9 +2,10 @@ from dgl.nn import GraphConv
 from dgl.nn.pytorch import SGConv
 from dgl.nn.pytorch import GatedGraphConv
 from dgl.nn.pytorch import ChebConv
-from dgl.nn.pytorch import GlobalAttentionPooling
+from dgl.nn.pytorch import AvgPooling
 from dgl.nn.pytorch.conv import GATConv
 from dgl.nn.pytorch.conv import SAGEConv
+from torch.nn import Dropout2d
 import torch.nn.functional as F
 import torch.nn as nn
 import numpy as np
@@ -294,7 +295,7 @@ class GraphSageBinaryClassifier(nn.Module):
     """
     Classification model for the prostate cancer dataset using GraphSage
     """
-    def __init__(self, in_dim, hidden_dim, aggregator_type='mean', feat_drop=0, use_cuda=False, fc_dropout_p=0.4):
+    def __init__(self, in_dim, hidden_dim, aggregator_type='mean', feat_drop=0, use_cuda=False, fc_dropout_p=0, conv_dropout_p=0):
         """
         Constructor for the GraphSageBinaryClassifier class
         Parameters:
@@ -309,6 +310,7 @@ class GraphSageBinaryClassifier(nn.Module):
 
         # Model layers
         self.conv1 = SAGEConv(in_dim, hidden_dim, aggregator_type=aggregator_type, feat_drop=feat_drop)
+        self.conv_dropout = Dropout2d(p=conv_dropout_p)
         self.conv2 = SAGEConv(hidden_dim, hidden_dim, aggregator_type=aggregator_type, feat_drop=feat_drop)
 
         self.fc_1 = nn.Linear(hidden_dim, hidden_dim)
@@ -317,8 +319,7 @@ class GraphSageBinaryClassifier(nn.Module):
         self.out_act = nn.Sigmoid()
 
         # Pooling layer
-        gate_nn = nn.Linear(hidden_dim, 1)
-        self.gap = GlobalAttentionPooling(gate_nn)
+        self.global_pool = AvgPooling()
 
         self.use_cuda = use_cuda
 
@@ -335,11 +336,11 @@ class GraphSageBinaryClassifier(nn.Module):
             h = h.cuda()
 
         # Two layers of Graph Convolution
-        h = F.relu(self.conv1(g, h))
+        h = F.relu(self.conv_dropout(self.conv1(g, h)))
         h = F.relu(self.conv2(g, h))
 
         # Use the mean of hidden embeddings to find graph embedding
-        hg = self.gap(g, h)
+        hg = self.global_pool(g, h)
 
         # Fully connected output layer
         h = F.relu(self.fc_1(hg))
