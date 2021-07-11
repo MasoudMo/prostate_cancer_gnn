@@ -4,12 +4,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from data import ProstateCancerDataset
 import torch
-from model import GraphConvBinaryClassifier
-from model import GraphAttConvBinaryClassifier
-from model import GraphSageBinaryClassifier
-from model import GatedGraphConvBinaryClassifier
-from model import SimpleGraphConvBinaryClassifier
-from model import ChebConvBinaryClassifier
+from model import GraphBinaryClassifier
 import argparse
 from sklearn.metrics import roc_auc_score
 from datetime import datetime
@@ -50,7 +45,7 @@ def save_checkpoint(epoch, model_state_dict, optimizer_state_dict, loss, path):
 def main():
 
     # Parse command line arguments
-    parser = argparse.ArgumentParser(description='GNN training on Prostate Cancer dataset')
+    parser = argparse.ArgumentParser(description='GNN training on Prostate Cancer dataset (graph classification)')
     parser.add_argument('--weighted',
                         type=bool,
                         default=False,
@@ -98,7 +93,7 @@ def main():
     # Parse config file
     config = configparser.ConfigParser()
     config.read('config.ini')
-    train_params = config['train_params']
+    train_params = config['graph_classification_train_params']
 
     mat_file_path = train_params['TimeSeriesMatFilePath']
     input_dim = int(train_params['SignalLength'])
@@ -170,26 +165,12 @@ def main():
     logger.info("Test dataset has {} samples.".format(test_set_len))
 
     # Initialize model
-    model = None
-    if gnn_type == 'gcn':
-        model = GraphConvBinaryClassifier(in_dim=input_dim, hidden_dim=hidden_dim, use_cuda=use_cuda)
-    elif gnn_type == 'gat':
-        model = GraphAttConvBinaryClassifier(in_dim=input_dim,
-                                             hidden_dim=hidden_dim,
-                                             use_cuda=use_cuda,
-                                             feat_drop=feat_drop,
-                                             attn_drop=attn_drop)
-    elif gnn_type == 'sage':
-        model = GraphSageBinaryClassifier(in_dim=input_dim,
-                                          hidden_dim=hidden_dim,
-                                          use_cuda=use_cuda,
-                                          feat_drop=feat_drop)
-    elif gnn_type == "cheb":
-        model = ChebConvBinaryClassifier(in_dim=input_dim, hidden_dim=hidden_dim, use_cuda=use_cuda)
-    elif gnn_type == "gated":
-        model = GatedGraphConvBinaryClassifier(in_dim=input_dim, hidden_dim=hidden_dim, use_cuda=use_cuda)
-    elif gnn_type == "sg":
-        model = SimpleGraphConvBinaryClassifier(in_dim=input_dim, hidden_dim=hidden_dim, use_cuda=use_cuda)
+    model = GraphBinaryClassifier(input_dim=input_dim,
+                                  hidden_dim=hidden_dim,
+                                  feat_drop=feat_drop,
+                                  use_cuda=use_cuda,
+                                  attn_drop=attn_drop,
+                                  conv_type=gnn_type)
 
     # Initialize loss function and optimizer
     loss_func = nn.BCELoss()

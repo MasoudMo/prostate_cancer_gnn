@@ -1,5 +1,5 @@
-from data import create_graph_for_node_classification
-from model import GraphConvBinaryNodeClassifier
+from data import create_graph_for_core_classification
+from model import NodeBinaryClassifier
 import torch.optim as optim
 import torch
 import torch.nn.functional as F
@@ -8,6 +8,9 @@ from sklearn.metrics import accuracy_score
 import numpy as np
 from sklearn.metrics import roc_auc_score
 import torch.nn as nn
+import configparser
+import argparse
+import visdom
 
 
 logger_level = logging.INFO
@@ -20,41 +23,117 @@ logger.addHandler(ch)
 
 
 def main():
+
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='GNN training on Prostate Cancer dataset (node classification)')
+    parser.add_argument('--weighted',
+                        type=bool,
+                        default=False,
+                        help='Indicates whether the graph is weighted or not')
+    parser.add_argument('--knn_n_jobs',
+                        type=int,
+                        default=1,
+                        help='Indicates the number jobs to deploy for graph creation')
+    parser.add_argument('--embeddings_path',
+                        type=str,
+                        default=None,
+                        help='Path to save node embeddings to')
+    parser.add_argument('--best_model_path',
+                        type=str,
+                        default='../model/node_model.pt',
+                        help='Path to save the best trained model to.')
+    parser.add_argument('--history_path',
+                        type=str,
+                        default=None,
+                        help='Path to save file with loss and accuracy history')
+    parser.add_argument('--checkpoint_path',
+                        type=str,
+                        default=None,
+                        help='Path to pickle file to continue the training from')
+    parser.add_argument('--feat_drop',
+                        type=float,
+                        default='0',
+                        help='Feature dropout rate used if gnn_type is set to graphsage or gat')
+    parser.add_argument('--attn_drop',
+                        type=float,
+                        default='0',
+                        help='Attention dropout rate used if gnn_type is set to gat')
+    args = parser.parse_args()
+
+    # Common arguments
+    best_model_path = args.best_model_path
+    history_path = args.history_path
+    checkpoint_path = args.checkpoint_path
+    weighted = args.weighted
+    knn_n_jobs = args.knn_n_jobs
+    feat_drop = args.feat_drop
+    attn_drop = args.attn_drop
+    embeddings_path = args.embeddings_path
+
+    # Parse config file
+    config = configparser.ConfigParser()
+    config.read('config.ini')
+    train_params = config['node_classification_train_params']
+
+    mat_file_path = train_params['TimeSeriesMatFilePath']
+    input_dim = int(train_params['SignalLength'])
+    hidden_dim = int(train_params['HiddenDim'])
+    learning_rate = float(train_params['LearningRate'])
+    epochs = int(train_params['Epochs'])
+    k = int(train_params['NumNodeNeighbours'])
+    gnn_type = train_params['GNNType']
+    perform_pca = train_params.getboolean('PerformPCA')
+    visualize = train_params.getboolean('Visualize')
+    get_cancer_grade = train_params.getboolean('GetCancerGrade')
+
+    if train_params['Threshold'] == 'None':
+        threshold = None
+    else:
+        threshold = float(train_params['Threshold'])
+
+    # Use visdom for online visualization
+    if visualize:
+        vis = visdom.Visdom()
+
+    # Check whether cuda is available or not
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    print("Using device: {}".format(device))
+    logger.info("Using device: {}".format(device))
 
-    g, labels, cg, trainmsk, valmsk, testmsk = create_graph_for_node_classification(mat_file_path='../data/BK_RF_P1_90_MICCAI_33.mat',
-                                                                                    fft_mat_file_path='../data/BK_FFT_P1_90_MICCAI_33.mat',
-                                                                                    test_mat_file_path='../data/BK_RF_P91_110.mat',
-                                                                                    test_fft_mat_file_path='../data/BK_RF_FFT_resmp_2_100_P91_110.mat',
-                                                                                    weighted=False,
-                                                                                    k=150,
-                                                                                    knn_n_jobs=1,
-                                                                                    cuda_knn=False,
-                                                                                    threshold=None,
-                                                                                    perform_pca=True,
-                                                                                    num_pca_components=40,
-                                                                                    get_cancer_grade=False)
+    g, labels, trainmsk, valmsk, testmsk, _cgs = create_graph_for_core_classification(mat_file_path=mat_file_path,
+                                                                                      weighted=weighted,
+                                                                                      k=k,
+                                                                                      knn_n_jobs=knn_n_jobs,
+                                                                                      cuda_knn=use_cuda,
+                                                                                      threshold=threshold,
+                                                                                      perform_pca=perform_pca,
+                                                                                      num_pca_components=input_dim,
+                                                                                      get_cancer_grade=get_cancer_grade)
 
-    labels = torch.squeeze(torch.tensor(labels, dtype=torch.long))
+    model = NodeBinaryClassifier(input_dim=input_dim,
+                                 hidden_dim=hidden_dim,
+                                 feat_drop=feat_drop,
+                                 use_cuda=use_cuda,
+                                 attn_drop=attn_drop,
+                                 conv_type=gnn_type)
 
-    model = GraphConvBinaryNodeClassifier(in_dim=40, hidden_dim=30, num_classes=2, use_cuda=False)
+    # Initialize loss function and optimizer
+    loss_func = nn.BCELoss()
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-    loss_func = nn.CrossEntropyLoss()
-
-    optimizer = optim.Adam(model.parameters(), lr=0.01)
-
-    f_train_l = open("../data/node_classification_train_losses.txt", "w")
-    f_train_a = open("../data/node_classification_train_accs.txt", "w")
-    f_val_l = open("../data/node_classification_val_losses.txt", "w")
-    f_val_a = open("../data/node_classification_val_accs.txt", "w")
-    f_test_l = open("../data/node_classification_test_losses.txt", "w")
-    f_test_a = open("../data/node_classification_test_accs.txt", "w")
+    # Loss and accuracy variables
+    train_losses = []
+    train_accs = []
+    loss = 0
 
     max_val_acc = 0
+    val_accs = []
+    val_losses = []
+
+    test_accs = []
+    test_losses = []
     
-    for epoch in range(1000000):
+    for epoch in range(epochs):
 
         model.train()
 
@@ -78,45 +157,32 @@ def main():
         # Accumulate epoch loss
         logger.info('Training epoch {}, loss {:.4f}'.format(epoch, loss.item()))
 
+        model.eval()
+
         # Calculate Training Accuracy
         with torch.no_grad():
-
-            model.eval()
 
             y_pred = np.argmax(prediction[trainmsk].detach(), axis=1)
             acc = accuracy_score(labels[trainmsk], y_pred)
             logger.info("Training accuracy {:.4f}".format(acc))
-            f_train_l.write(str(loss.item()) + "\n")
-            f_train_a.write(str(acc) + "\n")
 
             prediction = model(g)
-            loss = F.cross_entropy(prediction[valmsk].detach(), labels[valmsk])
+            loss = loss_func(prediction[valmsk].detach(), labels[valmsk])
             y_pred = np.argmax(prediction[valmsk].detach(), axis=1)
             acc = accuracy_score(labels[valmsk], y_pred)
             logger.info("Validation accuracy: {:.4f} loss: {:.4f}".format(acc, loss.item()))
-            f_val_l.write(str(loss.item()) + "\n")
-            f_val_a.write(str(acc) + "\n")
 
             if acc > max_val_acc:
                 max_val_acc = acc
                 # Save model checkpoint if validation accuracy has increased
-                logger.info("Validation accuracy increased. Saving model to {}".format('../data/best_model.pt'))
-                torch.save(model.state_dict(), '../data/best_model.pt')
+                logger.info("Validation accuracy increased. Saving model to {}".format(best_model_path))
+                torch.save(model.state_dict(), best_model_path)
 
             prediction = model(g)
-            loss = F.cross_entropy(prediction[testmsk].detach(), labels[testmsk])
+            loss = loss_func(prediction[testmsk].detach(), labels[testmsk])
             y_pred = np.argmax(prediction[testmsk].detach(), axis=1)
             acc = accuracy_score(labels[testmsk], y_pred)
             logger.info("Test accuracy {:.4f} loss: {:.4f}".format(acc, loss.item()))
-            f_test_l.write(str(loss.item()) + "\n")
-            f_test_a.write(str(acc) + "\n")
-
-    f_train_l.close()
-    f_train_a.close()
-    f_val_l.close()
-    f_val_a.close()
-    f_test_l.close()
-    f_test_a.close()
 
 
 if __name__ == "__main__":

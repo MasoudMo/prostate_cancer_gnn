@@ -1,7 +1,5 @@
 from dgl.nn import GraphConv
 from dgl.nn.pytorch import SGConv
-from dgl.nn.pytorch import GatedGraphConv
-from dgl.nn.pytorch import ChebConv
 from dgl.nn.pytorch import AvgPooling
 from dgl.nn.pytorch.conv import GATConv
 from dgl.nn.pytorch.conv import SAGEConv
@@ -13,24 +11,57 @@ import dgl
 import torch
 
 
-class GraphConvBinaryNodeClassifier(nn.Module):
+class NodeBinaryClassifier(nn.Module):
     """
-    Classification model for the prostate cancer dataset using GCN
+    Node classification model for the prostate cancer dataset
     """
-    def __init__(self, in_dim, hidden_dim, num_classes=2, use_cuda=False):
+    def __init__(self,
+                 input_dim,
+                 hidden_dim,
+                 aggregator_type='mean',
+                 feat_drop=0,
+                 use_cuda=False,
+                 fc_dropout_p=0,
+                 conv_dropout_p=0,
+                 attn_drop=0,
+                 conv_type='sage',
+                 num_heads=1):
         """
-        Constructor for the GraphConvBinaryClassifier class
+        Constructor for the NodeBinaryClassifier class
         Parameters:
-            in_dim (int): Dimension of features for each node
-            hidden_dim (int): Dimension of hidden embeddings
+            input_dim (int): dimension of features for each node
+            hidden_dim (int): dimension of hidden embeddings
+            aggregator_type (str): One of mean, lstm, gcn or pool
+            feat_drop (float): Indicates the dropout rate for the features
             use_cuda (bool): Indicates whether GPU should be utilized or not
-            num_classes (int): Number of output classes
+            fc_dropout_p (float): Indicates the FC layer dropout ratio
+            attn_drop (float): Indicates the dropout rate for the attention mechanism
+            conv_type (str): Type of GNN to use
+            num_heads (int): Number of attention heads for the GAT network
         """
-        super(GraphConvBinaryNodeClassifier, self).__init__()
+        super().__init__()
 
         # Model layers
-        self.conv1 = SAGEConv(in_dim, hidden_dim, feat_drop=0.3, aggregator_type='mean')
-        self.conv2 = SAGEConv(hidden_dim, num_classes, feat_drop=0.3, aggregator_type='mean')
+        if conv_type == 'sage':
+            self.conv1 = SAGEConv(input_dim, hidden_dim, aggregator_type=aggregator_type, feat_drop=feat_drop)
+            self.conv2 = SAGEConv(hidden_dim, hidden_dim, aggregator_type=aggregator_type, feat_drop=feat_drop)
+        elif conv_type == 'gcn':
+            self.conv1 = GraphConv(input_dim, hidden_dim)
+            self.conv2 = GraphConv(hidden_dim, hidden_dim)
+        elif conv_type == 'sg':
+            self.conv1 = SGConv(input_dim, hidden_dim)
+            self.conv2 = SGConv(hidden_dim, hidden_dim)
+        elif conv_type == 'gat':
+            self.conv1 = GATConv(input_dim, hidden_dim, feat_drop=feat_drop, attn_drop=attn_drop, num_heads=num_heads)
+            self.conv2 = GATConv(hidden_dim, hidden_dim, feat_drop=feat_drop, attn_drop=attn_drop, num_heads=num_heads)
+
+        self.conv_dropout = Dropout2d(p=conv_dropout_p)
+
+        self.fc_1 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc_dropout = nn.Dropout(p=fc_dropout_p)
+        self.fc_2 = nn.Linear(hidden_dim, 1)
+
+        self.out_act = nn.Sigmoid()
 
         self.use_cuda = use_cuda
 
@@ -47,271 +78,61 @@ class GraphConvBinaryNodeClassifier(nn.Module):
             h = h.cuda()
 
         # Two layers of Graph Convolution
-        h = F.relu(self.conv1(g, h))
-        h = self.conv2(g, h)
-
-        return h
-
-
-class GraphConvBinaryClassifier(nn.Module):
-    """
-    Classification model for the prostate cancer dataset using GCN
-    """
-    def __init__(self, in_dim, hidden_dim, use_cuda=False):
-        """
-        Constructor for the GraphConvBinaryClassifier class
-        Parameters:
-            in_dim (int): Dimension of features for each node
-            hidden_dim (int): Dimension of hidden embeddings
-            use_cuda (bool): Indicates whether GPU should be utilized or not
-        """
-        super(GraphConvBinaryClassifier, self).__init__()
-
-        # Model layers
-        self.conv1 = GraphConv(in_dim, hidden_dim)
-        self.conv2 = GraphConv(hidden_dim, hidden_dim)
-        self.fc_1 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc_2 = nn.Linear(hidden_dim, 1)
-        self.out_act = nn.Sigmoid()
-
-        self.use_cuda = use_cuda
-
-    def forward(self, g, itr=None, label=None, cg=None, embedding_path=None):
-        """
-        Forward path of classifier
-        Parameter:
-            g (DGL Graph): Input graph
-        """
-        # Use RF signals as node features
-        h = g.ndata['x']
-
-        if self.use_cuda:
-            h = h.cuda()
-
-        # Two layers of Graph Convolution
-        h = F.relu(self.conv1(g, h))
+        h = F.relu(self.conv_dropout(self.conv1(g, h)))
         h = F.relu(self.conv2(g, h))
-
-        # Use the mean of hidden embeddings to find graph embedding
-        g.ndata['h'] = h
-        hg = dgl.mean_nodes(g, 'h')
-
-        # Fully connected output layers
-        h = F.relu(self.fc_1(hg))
-        out = self.fc_2(h)
-
-        # Save graph embeddings to a text file for each epoch
-        with torch.no_grad():
-            if embedding_path is not None:
-                f = open(embedding_path+"_graph_embeddings_itr_" + str(itr) + ".txt", "a+")
-                f.write(str(int(label.cpu().numpy()[0][0])) + " ")
-                f.write(str(cg) + " ")
-                np.savetxt(f, hg.cpu().detach().numpy())
-                f.close()
-
-        return self.out_act(out)
-
-
-class GatedGraphConvBinaryClassifier(nn.Module):
-    """
-    Classification model for the prostate cancer dataset using GCN
-    """
-    def __init__(self, in_dim, hidden_dim, use_cuda=False):
-        """
-        Constructor for the GraphConvBinaryClassifier class
-        Parameters:
-            in_dim (int): Dimension of features for each node
-            hidden_dim (int): Dimension of hidden embeddings
-            use_cuda (bool): Indicates whether GPU should be utilized or not
-        """
-        super(GatedGraphConvBinaryClassifier, self).__init__()
-
-        # Model layers
-        self.conv1 = GatedGraphConv(in_dim, hidden_dim, n_steps=10, n_etypes=1)
-        self.conv2 = GatedGraphConv(hidden_dim, hidden_dim, n_steps=10, n_etypes=1)
-        self.fc_1 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc_2 = nn.Linear(hidden_dim, 1)
-        self.out_act = nn.Sigmoid()
-
-        self.use_cuda = use_cuda
-
-    def forward(self, g, itr=None, label=None, cg=None, embedding_path=None):
-        """
-        Forward path of classifier
-        Parameter:
-            g (DGL Graph): Input graph
-        """
-        # Use RF signals as node features
-        h = g.ndata['x']
-
-        if self.use_cuda:
-            h = h.cuda()
-
-        # Two layers of Graph Convolution
-        h = F.relu(self.conv1(g, h))
-        h = F.relu(self.conv2(g, h))
-
-        # Use the mean of hidden embeddings to find graph embedding
-        g.ndata['h'] = h
-        hg = dgl.mean_nodes(g, 'h')
 
         # Fully connected output layer
-        h = F.relu(self.fc_1(hg))
+        h = F.relu(self.fc_dropout(self.fc_1(h)))
         out = self.fc_2(h)
-
-        # Save graph embeddings to a text file for each epoch
-        with torch.no_grad():
-            if embedding_path is not None:
-                f = open(embedding_path+"_graph_embeddings_itr_" + str(itr) + ".txt", "a+")
-                f.write(str(int(label.cpu().numpy()[0][0])) + " ")
-                f.write(str(cg) + " ")
-                np.savetxt(f, hg.cpu().detach().numpy())
-                f.close()
 
         return self.out_act(out)
 
 
-class SimpleGraphConvBinaryClassifier(nn.Module):
+class GraphBinaryClassifier(nn.Module):
     """
-    Classification model for the prostate cancer dataset using GCN
+    Graph classification model for the prostate cancer dataset
     """
-    def __init__(self, in_dim, hidden_dim, use_cuda=False):
+    def __init__(self,
+                 input_dim,
+                 hidden_dim,
+                 aggregator_type='mean',
+                 feat_drop=0,
+                 use_cuda=False,
+                 fc_dropout_p=0,
+                 conv_dropout_p=0,
+                 attn_drop=0,
+                 conv_type='sage',
+                 num_heads=1):
         """
-        Constructor for the GraphConvBinaryClassifier class
+        Constructor for the GraphBinaryClassifier class
         Parameters:
-            in_dim (int): Dimension of features for each node
-            hidden_dim (int): Dimension of hidden embeddings
-            use_cuda (bool): Indicates whether GPU should be utilized or not
-        """
-        super(SimpleGraphConvBinaryClassifier, self).__init__()
-
-        # Model layers
-        self.conv1 = SGConv(in_dim, hidden_dim)
-        self.conv2 = SGConv(hidden_dim, hidden_dim)
-        self.fc_1 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc_2 = nn.Linear(hidden_dim, 1)
-        self.out_act = nn.Sigmoid()
-
-        self.use_cuda = use_cuda
-
-    def forward(self, g, itr=None, label=None, cg=None, embedding_path=None):
-        """
-        Forward path of classifier
-        Parameter:
-            g (DGL Graph): Input graph
-        """
-        # Use RF signals as node features
-        h = g.ndata['x']
-
-        if self.use_cuda:
-            h = h.cuda()
-
-        # Two layers of Graph Convolution
-        h = F.relu(self.conv1(g, h))
-        h = F.relu(self.conv2(g, h))
-
-        # Use the mean of hidden embeddings to find graph embedding
-        g.ndata['h'] = h
-        hg = dgl.mean_nodes(g, 'h')
-
-        # Fully connected output layer
-        h = F.relu(self.fc_1(hg))
-        out = self.fc_2(h)
-
-        # Save graph embeddings to a text file for each epoch
-        with torch.no_grad():
-            if embedding_path is not None:
-                f = open(embedding_path+"_graph_embeddings_itr_" + str(itr) + ".txt", "a+")
-                f.write(str(int(label.cpu().numpy()[0][0])) + " ")
-                f.write(str(cg) + " ")
-                np.savetxt(f, hg.cpu().detach().numpy())
-                f.close()
-
-        return self.out_act(out)
-
-
-class GraphAttConvBinaryClassifier(nn.Module):
-    """
-    Classification model for the prostate cancer dataset using GAT
-    """
-    def __init__(self, in_dim, hidden_dim, feat_drop=0, attn_drop=0, use_cuda=False):
-        """
-        Constructor for the GraphAttConvBinaryClassifier class
-        Parameters:
-            in_dim (int): Dimension of features for each node
-            hidden_dim (int): Dimension of hidden embeddings
-            feat_drop (float): Indicates the dropout rate for features
-            attn_drop (float): Indicates the dropout rate for the attention mechanism
-            use_cuda (bool): Indicates whether GPU should be utilized or not
-        """
-        super(GraphAttConvBinaryClassifier, self).__init__()
-
-        # Model layers
-        self.conv1 = GATConv(in_dim, hidden_dim, num_heads=1, feat_drop=feat_drop, attn_drop=attn_drop)
-        self.conv2 = GATConv(hidden_dim, hidden_dim, num_heads=1, feat_drop=feat_drop, attn_drop=attn_drop)
-        self.fc_1 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc_2 = nn.Linear(hidden_dim, 1)
-        self.out_act = nn.Sigmoid()
-
-        self.use_cuda = use_cuda
-
-    def forward(self, g, itr=None, label=None, cg=None, embedding_path=None):
-        """
-        Forward path of classifier
-        Parameter:
-            g (DGL Graph): Input graph
-        """
-        # Use RF signals as node features
-        h = g.ndata['x']
-
-        if self.use_cuda:
-            h = h.cuda()
-
-        # Two layers of Graph Convolution
-        h = F.relu(self.conv1(g, h))
-        h = F.relu(self.conv2(g, h))
-
-        # Use the mean of hidden embeddings to find graph embedding
-        g.ndata['h'] = h
-        hg = dgl.mean_nodes(g, 'h')[0]
-
-        # Fully connected output layer
-        h = F.relu(self.fc_1(hg))
-        out = self.fc_2(h)
-
-        # Save graph embeddings to a text file for each epoch
-        with torch.no_grad():
-            if embedding_path is not None:
-                f = open(embedding_path+"_graph_embeddings_itr_" + str(itr) + ".txt", "a+")
-                f.write(str(int(label.cpu().numpy()[0][0])) + " ")
-                f.write(str(cg) + " ")
-                np.savetxt(f, hg.cpu().detach().numpy())
-                f.close()
-
-        return self.out_act(out)
-
-
-class GraphSageBinaryClassifier(nn.Module):
-    """
-    Classification model for the prostate cancer dataset using GraphSage
-    """
-    def __init__(self, in_dim, hidden_dim, aggregator_type='mean', feat_drop=0, use_cuda=False, fc_dropout_p=0, conv_dropout_p=0):
-        """
-        Constructor for the GraphSageBinaryClassifier class
-        Parameters:
-            in_dim (int): dimension of features for each node
+            input_dim (int): dimension of features for each node
             hidden_dim (int): dimension of hidden embeddings
             aggregator_type (str): One of mean, lstm, gcn or pool
             feat_drop (float): Indicates the dropout rate for the features
             use_cuda (bool): Indicates whether GPU should be utilized or not
             fc_dropout_p (float): Indicates the FC layer dropout ratio
+            attn_drop (float): Indicates the dropout rate for the attention mechanism
+            conv_type (str): Type of GNN to use
+            num_heads (int): Number of attention heads for the GAT network
         """
-        super(GraphSageBinaryClassifier, self).__init__()
+        super().__init__()
 
         # Model layers
-        self.conv1 = SAGEConv(in_dim, hidden_dim, aggregator_type=aggregator_type, feat_drop=feat_drop)
+        if conv_type == 'sage':
+            self.conv1 = SAGEConv(input_dim, hidden_dim, aggregator_type=aggregator_type, feat_drop=feat_drop)
+            self.conv2 = SAGEConv(hidden_dim, hidden_dim, aggregator_type=aggregator_type, feat_drop=feat_drop)
+        elif conv_type == 'gcn':
+            self.conv1 = GraphConv(input_dim, hidden_dim)
+            self.conv2 = GraphConv(hidden_dim, hidden_dim)
+        elif conv_type == 'sg':
+            self.conv1 = SGConv(input_dim, hidden_dim)
+            self.conv2 = SGConv(hidden_dim, hidden_dim)
+        elif conv_type == 'gat':
+            self.conv1 = GATConv(input_dim, hidden_dim, feat_drop=feat_drop, attn_drop=attn_drop, num_heads=num_heads)
+            self.conv2 = GATConv(hidden_dim, hidden_dim, feat_drop=feat_drop, attn_drop=attn_drop, num_heads=num_heads)
+
         self.conv_dropout = Dropout2d(p=conv_dropout_p)
-        self.conv2 = SAGEConv(hidden_dim, hidden_dim, aggregator_type=aggregator_type, feat_drop=feat_drop)
 
         self.fc_1 = nn.Linear(hidden_dim, hidden_dim)
         self.fc_dropout = nn.Dropout(p=fc_dropout_p)
@@ -343,8 +164,7 @@ class GraphSageBinaryClassifier(nn.Module):
         hg = self.global_pool(g, h)
 
         # Fully connected output layer
-        h = F.relu(self.fc_1(hg))
-        h = self.fc_dropout(h)
+        h = F.relu(self.fc_dropout(self.fc_1(hg)))
         out = self.fc_2(h)
 
         # Save graph embeddings to a text file for each epoch
@@ -358,61 +178,3 @@ class GraphSageBinaryClassifier(nn.Module):
 
         return self.out_act(out)
 
-
-class ChebConvBinaryClassifier(nn.Module):
-    """
-    Classification model for the prostate cancer dataset using GCN
-    """
-    def __init__(self, in_dim, hidden_dim, use_cuda=False):
-        """
-        Constructor for the GraphConvBinaryClassifier class
-        Parameters:
-            in_dim (int): Dimension of features for each node
-            hidden_dim (int): Dimension of hidden embeddings
-            use_cuda (bool): Indicates whether GPU should be utilized or not
-        """
-        super(ChebConvBinaryClassifier, self).__init__()
-
-        # Model layers
-        self.conv1 = ChebConv(in_dim, hidden_dim, k=5)
-        self.conv2 = ChebConv(hidden_dim, hidden_dim, k=5)
-        self.fc_1 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc_2 = nn.Linear(hidden_dim, 1)
-        self.out_act = nn.Sigmoid()
-
-        self.use_cuda = use_cuda
-
-    def forward(self, g, itr=None, label=None, cg=None, embedding_path=None):
-        """
-        Forward path of classifier
-        Parameter:
-            g (DGL Graph): Input graph
-        """
-        # Use RF signals as node features
-        h = g.ndata['x']
-
-        if self.use_cuda:
-            h = h.cuda()
-
-        # Two layers of Graph Convolution
-        h = F.relu(self.conv1(g, h))
-        h = F.relu(self.conv2(g, h))
-
-        # Use the mean of hidden embeddings to find graph embedding
-        g.ndata['h'] = h
-        hg = dgl.mean_nodes(g, 'h')
-
-        # Fully connected output layer
-        h = F.relu(self.fc_1(hg))
-        out = self.fc_2(h)
-
-        # Save graph embeddings to a text file for each epoch
-        with torch.no_grad():
-            if embedding_path is not None:
-                f = open(embedding_path+"_graph_embeddings_itr_" + str(itr) + ".txt", "a+")
-                f.write(str(int(label.cpu().numpy()[0][0])) + " ")
-                f.write(str(cg) + " ")
-                np.savetxt(f, hg.cpu().detach().numpy())
-                f.close()
-
-        return self.out_act(out)
