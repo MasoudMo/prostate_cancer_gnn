@@ -89,7 +89,9 @@ def main():
     num_signals = int(train_params['NumSignals'])
     use_core_loc = train_params.getboolean('UseCoreLocationGraph')
     conv1d_kernel_size = int(train_params['1DConvKernelSize'])
+    conv1d_stride = int(train_params['1DConvStrideSize'])
     num_heads = int(train_params['NumGATHeads'])
+    weight_decay = float(train_params['WeightDecay'])
 
     if train_params['Threshold'] == 'None':
         threshold = None
@@ -131,7 +133,8 @@ def main():
                                  conv_dropout_p=conv_dropout_p,
                                  num_signal_channels=num_signals,
                                  core_location_graph=use_core_loc,
-                                 kernel_size=conv1d_kernel_size,
+                                 conv1d_kernel_size=conv1d_kernel_size,
+                                 conv1d_stride=conv1d_stride,
                                  num_heads=num_heads)
 
     # Move model to GPU if available
@@ -140,7 +143,7 @@ def main():
 
     # Initialize loss function and optimizer
     loss_func = nn.BCEWithLogitsLoss()
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=0)
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
     # Loss and accuracy variables
     train_losses = []

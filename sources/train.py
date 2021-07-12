@@ -104,6 +104,13 @@ def main():
     gnn_type = train_params['GNNType']
     perform_pca = train_params.getboolean('PerformPCA')
     visualize = train_params.getboolean('Visualize')
+    get_cancer_grade = train_params.getboolean('GetCancerGrade')
+    fc_dropout_p = float(train_params['FCDropout'])
+    conv_dropout_p = float(train_params['ConvDropout'])
+    conv1d_kernel_size = int(train_params['1DConvKernelSize'])
+    conv1d_stride = int(train_params['1DConvStrideSize'])
+    num_heads = int(train_params['NumGATHeads'])
+    weight_decay = float(train_params['WeightDecay'])
 
     if train_params['Threshold'] == 'None':
         threshold = None
@@ -112,7 +119,7 @@ def main():
 
     # Use visdom for online visualization
     if visualize:
-        vis = visdom.Visdom()
+        vis = visdom.Visdom(port=8150)
 
     # Check whether cuda is available or not
     use_cuda = torch.cuda.is_available()
@@ -174,11 +181,16 @@ def main():
                                   feat_drop=feat_drop,
                                   use_cuda=use_cuda,
                                   attn_drop=attn_drop,
-                                  conv_type=gnn_type)
+                                  conv_type=gnn_type,
+                                  fc_dropout_p=fc_dropout_p,
+                                  conv_dropout_p=conv_dropout_p,
+                                  conv1d_kernel_size=conv1d_kernel_size,
+                                  conv1d_stride=conv1d_stride,
+                                  num_heads=num_heads)
 
     # Initialize loss function and optimizer
-    loss_func = nn.BCELoss()
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    loss_func = nn.BCEWithLogitsLoss()
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
     # Initialize starting epoch index
     starting_epoch = 0
@@ -366,7 +378,7 @@ def main():
             if acc > max_val_acc:
                 max_val_acc = acc
                 # Save model checkpoint if validation accuracy has increased
-                logger.info("Validation accuracy increased. Saving model to {}".format(best_model_path))
+                logger.warning("Validation accuracy increased ({:.4f}). Saving model to {}".format(max_val_acc, best_model_path))
                 save_checkpoint(epoch, model.state_dict(), optimizer.state_dict(), loss, best_model_path)
 
         t_start = datetime.now()
