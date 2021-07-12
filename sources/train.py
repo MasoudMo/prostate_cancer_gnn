@@ -119,6 +119,10 @@ def main():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     logger.info("Using device: {}".format(device))
 
+    # Reproducibility
+    torch.manual_seed(0)
+    np.random.seed(0)
+
     # Load the train dataset
     dataset_train = ProstateCancerDataset(mat_file_path=mat_file_path,
                                           mode='train',

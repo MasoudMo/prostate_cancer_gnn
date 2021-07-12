@@ -4,7 +4,6 @@ import torch.optim as optim
 import torch
 import torch.nn.functional as F
 import logging
-from sklearn.metrics import accuracy_score
 import numpy as np
 from sklearn.metrics import roc_auc_score
 import torch.nn as nn
@@ -85,6 +84,9 @@ def main():
     perform_pca = train_params.getboolean('PerformPCA')
     visualize = train_params.getboolean('Visualize')
     get_cancer_grade = train_params.getboolean('GetCancerGrade')
+    fc_dropout_p = float(train_params['FCDropout'])
+    conv_dropout_p = float(train_params['ConvDropout'])
+    num_signals = int(train_params['NumSignals'])
 
     if train_params['Threshold'] == 'None':
         threshold = None
@@ -93,12 +95,16 @@ def main():
 
     # Use visdom for online visualization
     if visualize:
-        vis = visdom.Visdom()
+        vis = visdom.Visdom(port=8150)
 
     # Check whether cuda is available or not
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     logger.info("Using device: {}".format(device))
+
+    # Reproducibility
+    torch.manual_seed(0)
+    np.random.seed(0)
 
     g, labels, trainmsk, valmsk, testmsk, _cgs = create_graph_for_core_classification(mat_file_path=mat_file_path,
                                                                                       weighted=weighted,
@@ -115,11 +121,14 @@ def main():
                                  feat_drop=feat_drop,
                                  use_cuda=use_cuda,
                                  attn_drop=attn_drop,
-                                 conv_type=gnn_type)
+                                 conv_type=gnn_type,
+                                 fc_dropout_p=fc_dropout_p,
+                                 conv_dropout_p=conv_dropout_p,
+                                 num_signal_channels=num_signals)
 
     # Initialize loss function and optimizer
-    loss_func = nn.BCELoss()
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    loss_func = nn.BCEWithLogitsLoss()
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=0.001)
 
     # Loss and accuracy variables
     train_losses = []
@@ -162,27 +171,50 @@ def main():
         # Calculate Training Accuracy
         with torch.no_grad():
 
-            y_pred = np.argmax(prediction[trainmsk].detach(), axis=1)
-            acc = accuracy_score(labels[trainmsk], y_pred)
-            logger.info("Training accuracy {:.4f}".format(acc))
+            train_acc = roc_auc_score(labels[trainmsk], prediction[trainmsk])
+            logger.info("Training accuracy {:.4f}".format(train_acc))
 
             prediction = model(g)
-            loss = loss_func(prediction[valmsk].detach(), labels[valmsk])
-            y_pred = np.argmax(prediction[valmsk].detach(), axis=1)
-            acc = accuracy_score(labels[valmsk], y_pred)
-            logger.info("Validation accuracy: {:.4f} loss: {:.4f}".format(acc, loss.item()))
+            val_loss = loss_func(prediction[valmsk], labels[valmsk]).item()
+            val_acc = roc_auc_score(labels[valmsk], prediction[valmsk])
+            logger.info("Validation accuracy: {:.4f} loss: {:.4f}".format(val_acc, val_loss))
 
-            if acc > max_val_acc:
-                max_val_acc = acc
+            if val_acc > max_val_acc:
+                max_val_acc = val_acc
                 # Save model checkpoint if validation accuracy has increased
                 logger.info("Validation accuracy increased. Saving model to {}".format(best_model_path))
                 torch.save(model.state_dict(), best_model_path)
 
             prediction = model(g)
-            loss = loss_func(prediction[testmsk].detach(), labels[testmsk])
-            y_pred = np.argmax(prediction[testmsk].detach(), axis=1)
-            acc = accuracy_score(labels[testmsk], y_pred)
-            logger.info("Test accuracy {:.4f} loss: {:.4f}".format(acc, loss.item()))
+            test_loss = loss_func(prediction[testmsk], labels[testmsk]).item()
+            test_acc = roc_auc_score(labels[testmsk], prediction[testmsk])
+            logger.info("Test accuracy {:.4f} loss: {:.4f}".format(test_acc, test_loss))
+
+            # Visualize the loss and accuracy
+            if visualize:
+                vis.line(Y=torch.reshape(torch.tensor(loss.item()), (-1, )), X=torch.reshape(torch.tensor(epoch), (-1, )),
+                         update='append', win='train_loss',
+                         opts=dict(title="Train Losses Per Epoch", xlabel="Epoch", ylabel="Loss"))
+
+                vis.line(Y=torch.reshape(torch.tensor(train_acc), (-1, )), X=torch.reshape(torch.tensor(epoch), (-1, )),
+                         update='append', win='train_acc',
+                         opts=dict(title="Train Accuracy Per Epoch", xlabel="Epoch", ylabel="Accuracy"))
+
+                vis.line(Y=torch.reshape(torch.tensor(val_loss), (-1,)), X=torch.reshape(torch.tensor(epoch), (-1,)),
+                         update='append', win='val_loss',
+                         opts=dict(title="Validation Losses Per Epoch", xlabel="Epoch", ylabel="Loss"))
+
+                vis.line(Y=torch.reshape(torch.tensor(val_acc), (-1,)), X=torch.reshape(torch.tensor(epoch), (-1,)),
+                         update='append', win='val_acc',
+                         opts=dict(title="Validation Accuracy Per Epoch", xlabel="Epoch", ylabel="Accuracy"))
+
+                vis.line(Y=torch.reshape(torch.tensor(test_loss), (-1,)), X=torch.reshape(torch.tensor(epoch), (-1,)),
+                         update='append', win='test_loss',
+                         opts=dict(title="Test Losses Per Epoch", xlabel="Epoch", ylabel="Loss"))
+
+                vis.line(Y=torch.reshape(torch.tensor(test_acc), (-1,)), X=torch.reshape(torch.tensor(epoch), (-1,)),
+                         update='append', win='test_acc',
+                         opts=dict(title="Test Accuracy Per Epoch", xlabel="Epoch", ylabel="Accuracy"))
 
 
 if __name__ == "__main__":
