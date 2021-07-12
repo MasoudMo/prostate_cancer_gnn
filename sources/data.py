@@ -426,6 +426,7 @@ def create_graph_for_core_classification(mat_file_path,
 
         # Create dgl graph
         g = dgl.from_networkx(graph)
+        g = g.to(device)
 
         # Adding node features
         g.nodes[:].data['x'] = torch.from_numpy(cores_data).type(torch.float32).to(device)

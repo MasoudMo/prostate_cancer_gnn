@@ -12,7 +12,7 @@ import argparse
 import visdom
 
 
-logger_level = logging.INFO
+logger_level = logging.WARNING
 
 logger = logging.getLogger('gnn_prostate_cancer')
 logger.setLevel(logger_level)
@@ -134,6 +134,10 @@ def main():
                                  kernel_size=conv1d_kernel_size,
                                  num_heads=num_heads)
 
+    # Move model to GPU if available
+    if use_cuda:
+        model = model.cuda()
+
     # Initialize loss function and optimizer
     loss_func = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=0)
@@ -179,23 +183,23 @@ def main():
         # Calculate Training Accuracy
         with torch.no_grad():
 
-            train_acc = roc_auc_score(labels[trainmsk], prediction[trainmsk])
+            train_acc = roc_auc_score(labels[trainmsk].cpu().detach().numpy(), prediction[trainmsk].cpu().detach().numpy())
             logger.info("Training accuracy {:.4f}".format(train_acc))
 
             prediction = model(g)
             val_loss = loss_func(prediction[valmsk], labels[valmsk]).item()
-            val_acc = roc_auc_score(labels[valmsk], prediction[valmsk])
+            val_acc = roc_auc_score(labels[valmsk].cpu().detach().numpy(), prediction[valmsk].cpu().detach().numpy())
             logger.info("Validation accuracy: {:.4f} loss: {:.4f}".format(val_acc, val_loss))
 
             if val_acc > max_val_acc:
                 max_val_acc = val_acc
                 # Save model checkpoint if validation accuracy has increased
-                logger.info("Validation accuracy increased. Saving model to {}".format(best_model_path))
+                logger.warning("Validation accuracy increased ({:.4f}). Saving model to {}".format(max_val_acc, best_model_path))
                 torch.save(model.state_dict(), best_model_path)
 
             prediction = model(g)
             test_loss = loss_func(prediction[testmsk], labels[testmsk]).item()
-            test_acc = roc_auc_score(labels[testmsk], prediction[testmsk])
+            test_acc = roc_auc_score(labels[testmsk].cpu().detach().numpy(), prediction[testmsk].cpu().detach().numpy())
             logger.info("Test accuracy {:.4f} loss: {:.4f}".format(test_acc, test_loss))
 
             # Visualize the loss and accuracy
