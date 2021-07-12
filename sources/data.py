@@ -332,7 +332,13 @@ def create_graph_for_core_classification(mat_file_path,
                                          val_label_string='label_val',
                                          train_cancer_grade_string='GS_train',
                                          val_cancer_grade_string='GS_val',
-                                         test_cancer_grade_string='GS_test'):
+                                         test_cancer_grade_string='GS_test',
+                                         core_location_graph=False,
+                                         signal_level_graph=False,
+                                         num_signals=1500,
+                                         train_corename_string='corename_train',
+                                         val_corename_string='corename_val',
+                                         test_corename_string='corename_test'):
     # Load the .mat file
     prostate_cancer_mat_data = h5py.File(mat_file_path, 'r')
 
@@ -397,48 +403,76 @@ def create_graph_for_core_classification(mat_file_path,
 
     # Obtain the core signals and change them into a numpy array
     cores_data = list()
-    for idx in range(train_cores_num):
-        cores_data.append(np.mean(prostate_cancer_mat_data[train_mat_data[idx, 0]][()], axis=1))
-    for idx in range(val_cores_num):
-        cores_data.append(np.mean(prostate_cancer_mat_data[val_mat_data[idx, 0]][()], axis=1))
-    for idx in range(test_cores_num):
-        cores_data.append(np.mean(prostate_cancer_mat_data[test_mat_data[idx, 0]][()], axis=1))
-    cores_data = np.array(cores_data, dtype=np.float32)
+    if core_location_graph:
+        for idx in range(train_cores_num):
+            cores_data.append(np.expand_dims(
+                np.swapaxes(prostate_cancer_mat_data[train_mat_data[idx, 0]][()][:, :num_signals], 0, 1), axis=0))
+        for idx in range(val_cores_num):
+            cores_data.append(np.expand_dims(
+                np.swapaxes(prostate_cancer_mat_data[val_mat_data[idx, 0]][()][:, :num_signals], 0, 1), axis=0))
+        for idx in range(test_cores_num):
+            cores_data.append(np.expand_dims(
+                np.swapaxes(prostate_cancer_mat_data[test_mat_data[idx, 0]][()][:, :num_signals], 0, 1), axis=0))
+        cores_data = np.vstack(cores_data)
 
-    # Perform PCA on time domain data (To be used as node features)
-    if perform_pca:
-        t_start = datetime.now()
-        pca = PCA(n_components=num_pca_components)
-        pca.fit(cores_data)
-        reduced_data = pca.transform(cores_data)
-        t_end = datetime.now()
-        logger.debug("PCA Reduction for RF data took {}".format(t_end - t_start))
+        # Create core location graph in networkx
+        core_locations = np.concatenate((np.array(prostate_cancer_mat_data[train_corename_string], dtype=np.int8),
+                                         np.array(prostate_cancer_mat_data[val_corename_string], dtype=np.int8),
+                                         np.array(prostate_cancer_mat_data[test_corename_string], dtype=np.int8)), axis=1)
+        graph = list()
+        for i in range(8):
+            graph.append(nx.complete_graph(np.where(core_locations[i] == 1)[0]))
+        graph = nx.compose_all(graph)
 
-    if perform_pca:
-        # noinspection PyUnboundLocalVariable
-        graph = create_knn_adj_mat(reduced_data,
-                                   k=k,
-                                   weighted=weighted,
-                                   n_jobs=knn_n_jobs,
-                                   threshold=threshold,
-                                   use_gpu=cuda_knn)
+        # Create dgl graph
+        g = dgl.from_networkx(graph)
+
+        # Adding node features
+        g.nodes[:].data['x'] = torch.from_numpy(cores_data).type(torch.float32).to(device)
+
     else:
-        graph = create_knn_adj_mat(cores_data,
-                                   k=k,
-                                   weighted=weighted,
-                                   n_jobs=knn_n_jobs,
-                                   threshold=threshold,
-                                   use_gpu=cuda_knn)
+        for idx in range(train_cores_num):
+            cores_data.append(np.mean(prostate_cancer_mat_data[train_mat_data[idx, 0]][()], axis=1))
+        for idx in range(val_cores_num):
+            cores_data.append(np.mean(prostate_cancer_mat_data[val_mat_data[idx, 0]][()], axis=1))
+        for idx in range(test_cores_num):
+            cores_data.append(np.mean(prostate_cancer_mat_data[test_mat_data[idx, 0]][()], axis=1))
+        cores_data = np.array(cores_data, dtype=np.float32)
 
-    # Create a dgl graph from coo_matrix
-    g = dgl.from_scipy(graph, device=device)
-    g = dgl.add_self_loop(g)
+        # Perform PCA on time domain data (To be used as node features)
+        if perform_pca:
+            t_start = datetime.now()
+            pca = PCA(n_components=num_pca_components)
+            pca.fit(cores_data)
+            reduced_data = pca.transform(cores_data)
+            t_end = datetime.now()
+            logger.debug("PCA Reduction for RF data took {}".format(t_end - t_start))
 
-    # Put time domain signals as node features
-    if perform_pca:
-        g.nodes[:].data['x'] = torch.from_numpy(reduced_data).to(device)
-    else:
-        g.nodes[:].data['x'] = torch.from_numpy(cores_data).to(device)
+        if perform_pca:
+            # noinspection PyUnboundLocalVariable
+            graph = create_knn_adj_mat(reduced_data,
+                                       k=k,
+                                       weighted=weighted,
+                                       n_jobs=knn_n_jobs,
+                                       threshold=threshold,
+                                       use_gpu=cuda_knn)
+        else:
+            graph = create_knn_adj_mat(cores_data,
+                                       k=k,
+                                       weighted=weighted,
+                                       n_jobs=knn_n_jobs,
+                                       threshold=threshold,
+                                       use_gpu=cuda_knn)
+
+        # Create a dgl graph from coo_matrix
+        g = dgl.from_scipy(graph, device=device)
+        g = dgl.add_self_loop(g)
+
+        # Put time domain signals as node features
+        if perform_pca:
+            g.nodes[:].data['x'] = torch.from_numpy(reduced_data).to(device)
+        else:
+            g.nodes[:].data['x'] = torch.from_numpy(cores_data).to(device)
 
     return g, labels, trainmsk, valmsk, testmsk, cgs
 

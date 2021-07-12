@@ -25,10 +25,11 @@ class NodeBinaryClassifier(nn.Module):
                  conv_dropout_p=0,
                  attn_drop=0,
                  conv_type='sage',
-                 num_heads=1,
+                 num_heads=3,
                  apply_output_activation=False,
                  kernel_size=10,
-                 num_signal_channels=4500):
+                 num_signal_channels=1,
+                 core_location_graph=False):
         """
         Constructor for the NodeBinaryClassifier class
         Parameters:
@@ -48,7 +49,7 @@ class NodeBinaryClassifier(nn.Module):
         super().__init__()
 
         # Model layers
-        self.conv1d = Conv1d(in_channels=1, out_channels=1, kernel_size=kernel_size)
+        self.conv1d = Conv1d(in_channels=num_signal_channels, out_channels=1, kernel_size=kernel_size)
 
         self.conv1d_output_size = input_dim - (kernel_size-1)
 
@@ -57,14 +58,14 @@ class NodeBinaryClassifier(nn.Module):
                                   feat_drop=feat_drop)
             self.conv2 = SAGEConv(hidden_dim, int(hidden_dim/2), aggregator_type=aggregator_type, feat_drop=feat_drop)
         elif conv_type == 'gcn':
-            self.conv1 = GraphConv(input_dim, hidden_dim)
+            self.conv1 = GraphConv(self.conv1d_output_size, hidden_dim)
             self.conv2 = GraphConv(hidden_dim, int(hidden_dim/2))
         elif conv_type == 'sg':
-            self.conv1 = SGConv(input_dim, hidden_dim)
+            self.conv1 = SGConv(self.conv1d_output_size, hidden_dim)
             self.conv2 = SGConv(hidden_dim, int(hidden_dim/2))
         elif conv_type == 'gat':
-            self.conv1 = GATConv(input_dim, hidden_dim, feat_drop=feat_drop, attn_drop=attn_drop, num_heads=num_heads)
-            self.conv2 = GATConv(hidden_dim, int(hidden_dim/2), feat_drop=feat_drop, attn_drop=attn_drop,
+            self.conv1 = GATConv(self.conv1d_output_size, hidden_dim, feat_drop=feat_drop, attn_drop=attn_drop, num_heads=num_heads)
+            self.conv2 = GATConv(hidden_dim*num_heads, int(hidden_dim/2), feat_drop=feat_drop, attn_drop=attn_drop,
                                  num_heads=num_heads)
 
         self.conv_dropout = Dropout2d(p=conv_dropout_p)
@@ -77,6 +78,8 @@ class NodeBinaryClassifier(nn.Module):
 
         self.use_cuda = use_cuda
         self.apply_output_activation = apply_output_activation
+        self.num_signal_channels = num_signal_channels
+        self.conv_type = conv_type
 
     def forward(self, g):
         """
@@ -91,23 +94,31 @@ class NodeBinaryClassifier(nn.Module):
             h = h.cuda()
 
         # 1D conv
-        h = torch.unsqueeze(h, dim=1)
+        if self.num_signal_channels == 1:
+            h = torch.unsqueeze(h, dim=1)
         h = self.conv1d(h)
         h = torch.squeeze(h)
 
         # Two layers of Graph Convolution
         h = F.relu(self.conv_dropout(self.conv1(g, h)))
+
+        if self.conv_type == 'gat':
+            h = torch.flatten(h, start_dim=1)
+
         h = F.relu(self.conv2(g, h))
+
+        if self.conv_type == 'gat':
+            h = torch.mean(h, dim=1)
 
         # Fully connected output layer
         h = F.relu(self.fc_dropout(self.fc_1(h)))
         h = F.relu(self.fc_dropout(self.fc_2(h)))
-        out = self.fc_3(h)
+        h = self.fc_3(h)
 
         if self.apply_output_activation:
-            out = self.out_act(out)
+            h = self.out_act(h)
 
-        return out
+        return h
 
 
 class GraphBinaryClassifier(nn.Module):
@@ -190,10 +201,10 @@ class GraphBinaryClassifier(nn.Module):
 
         # Fully connected output layer
         h = F.relu(self.fc_dropout(self.fc_1(hg)))
-        out = self.fc_2(h)
+        h = self.fc_2(h)
 
         if self.apply_output_activation:
-            out = self.out_act(out)
+            h = self.out_act(h)
 
         # Save graph embeddings to a text file for each epoch
         with torch.no_grad():
@@ -204,5 +215,5 @@ class GraphBinaryClassifier(nn.Module):
                 np.savetxt(f, hg.cpu().detach().numpy())
                 f.close()
 
-        return self.out_act(out)
+        return h
 

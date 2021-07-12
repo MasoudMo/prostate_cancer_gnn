@@ -87,6 +87,9 @@ def main():
     fc_dropout_p = float(train_params['FCDropout'])
     conv_dropout_p = float(train_params['ConvDropout'])
     num_signals = int(train_params['NumSignals'])
+    use_core_loc = train_params.getboolean('UseCoreLocationGraph')
+    conv1d_kernel_size = int(train_params['1DConvKernelSize'])
+    num_heads = int(train_params['NumGATHeads'])
 
     if train_params['Threshold'] == 'None':
         threshold = None
@@ -114,7 +117,9 @@ def main():
                                                                                       threshold=threshold,
                                                                                       perform_pca=perform_pca,
                                                                                       num_pca_components=input_dim,
-                                                                                      get_cancer_grade=get_cancer_grade)
+                                                                                      get_cancer_grade=get_cancer_grade,
+                                                                                      core_location_graph=use_core_loc,
+                                                                                      num_signals=num_signals)
 
     model = NodeBinaryClassifier(input_dim=input_dim,
                                  hidden_dim=hidden_dim,
@@ -124,11 +129,14 @@ def main():
                                  conv_type=gnn_type,
                                  fc_dropout_p=fc_dropout_p,
                                  conv_dropout_p=conv_dropout_p,
-                                 num_signal_channels=num_signals)
+                                 num_signal_channels=num_signals,
+                                 core_location_graph=use_core_loc,
+                                 kernel_size=conv1d_kernel_size,
+                                 num_heads=num_heads)
 
     # Initialize loss function and optimizer
     loss_func = nn.BCEWithLogitsLoss()
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=0.001)
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=0)
 
     # Loss and accuracy variables
     train_losses = []
