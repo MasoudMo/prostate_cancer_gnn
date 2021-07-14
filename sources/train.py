@@ -46,14 +46,6 @@ def main():
 
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='GNN training on Prostate Cancer dataset (graph classification)')
-    parser.add_argument('--weighted',
-                        type=bool,
-                        default=False,
-                        help='Indicates whether the graph is weighted or not')
-    parser.add_argument('--knn_n_jobs',
-                        type=int,
-                        default=1,
-                        help='Indicates the number jobs to deploy for graph creation')
     parser.add_argument('--embeddings_path',
                         type=str,
                         default=None,
@@ -70,24 +62,12 @@ def main():
                         type=str,
                         default=None,
                         help='Path to pickle file to continue the training from')
-    parser.add_argument('--feat_drop',
-                        type=float,
-                        default='0',
-                        help='Feature dropout rate used if gnn_type is set to graphsage or gat')
-    parser.add_argument('--attn_drop',
-                        type=float,
-                        default='0',
-                        help='Attention dropout rate used if gnn_type is set to gat')
     args = parser.parse_args()
 
     # Common arguments
     best_model_path = args.best_model_path
     history_path = args.history_path
     checkpoint_path = args.checkpoint_path
-    weighted = args.weighted
-    knn_n_jobs = args.knn_n_jobs
-    feat_drop = args.feat_drop
-    attn_drop = args.attn_drop
     embeddings_path = args.embeddings_path
 
     # Parse config file
@@ -111,6 +91,9 @@ def main():
     conv1d_stride = int(train_params['1DConvStrideSize'])
     num_heads = int(train_params['NumGATHeads'])
     weight_decay = float(train_params['WeightDecay'])
+    feat_drop = float(train_params['GNNFeatDrop'])
+    attn_drop = float(train_params['GNNAttnDrop'])
+    weighted =  train_params.getboolean('WeightedGraph')
 
     if train_params['Threshold'] == 'None':
         threshold = None
@@ -135,7 +118,7 @@ def main():
                                           mode='train',
                                           weighted=weighted,
                                           k=k,
-                                          knn_n_jobs=knn_n_jobs,
+                                          knn_n_jobs=1,
                                           cuda_knn=use_cuda,
                                           threshold=threshold,
                                           perform_pca=perform_pca,
@@ -150,7 +133,7 @@ def main():
                                         mode='val',
                                         weighted=weighted,
                                         k=k,
-                                        knn_n_jobs=knn_n_jobs,
+                                        knn_n_jobs=1,
                                         cuda_knn=use_cuda,
                                         threshold=threshold,
                                         perform_pca=perform_pca,
@@ -165,7 +148,7 @@ def main():
                                          mode='test',
                                          weighted=weighted,
                                          k=k,
-                                         knn_n_jobs=knn_n_jobs,
+                                         knn_n_jobs=1,
                                          cuda_knn=use_cuda,
                                          threshold=threshold,
                                          perform_pca=perform_pca,
