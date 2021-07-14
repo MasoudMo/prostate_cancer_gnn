@@ -198,7 +198,8 @@ def create_knn_adj_mat(features, k, weighted=False, n_jobs=None, algorithm='auto
         knn = KNN(k=k, transpose_mode=False)
 
         # Find the k nearest neighbours and their distance
-        dist, idx = knn(torch.from_numpy(features_extra_dim).contiguous().cuda(), torch.from_numpy(features_extra_dim).contiguous().clone().cuda())
+        dist, idx = knn(torch.from_numpy(features_extra_dim).contiguous().cuda(),
+                        torch.from_numpy(features_extra_dim).contiguous().clone().cuda())
 
         torch.cuda.empty_cache()
 

@@ -30,8 +30,7 @@ class NodeBinaryClassifier(nn.Module):
                  apply_output_activation=False,
                  conv1d_kernel_size=10,
                  conv1d_stride=8,
-                 num_signal_channels=1,
-                 core_location_graph=False):
+                 num_signal_channels=1):
         """
         Constructor for the NodeBinaryClassifier class
         Parameters:
@@ -48,19 +47,25 @@ class NodeBinaryClassifier(nn.Module):
             conv1d_kernel_size (int): Kernel size for 1D conv
             conv1d_stride (int): Stride used for 1D conv
             num_signal_channels (int): Number of signals per core
-            core_location_graph (bool): Indicates whether core location graph is used or not
         """
         super().__init__()
 
         # Model layers
-        self.conv1d = Conv1d(in_channels=num_signal_channels, out_channels=1, kernel_size=conv1d_kernel_size, stride=conv1d_stride)
+        self.conv1d = Conv1d(in_channels=num_signal_channels,
+                             out_channels=1,
+                             kernel_size=conv1d_kernel_size,
+                             stride=conv1d_stride)
 
         self.conv1d_output_size = floor((input_dim - (conv1d_kernel_size-1) - 1)/conv1d_stride+1)
 
         if conv_type == 'sage':
-            self.conv1 = SAGEConv(self.conv1d_output_size, hidden_dim, aggregator_type=aggregator_type,
+            self.conv1 = SAGEConv(self.conv1d_output_size,
+                                  hidden_dim,
+                                  aggregator_type=aggregator_type,
                                   feat_drop=feat_drop)
-            self.conv2 = SAGEConv(hidden_dim, int(hidden_dim/2), aggregator_type=aggregator_type, feat_drop=feat_drop)
+            self.conv2 = SAGEConv(hidden_dim, int(hidden_dim/2),
+                                  aggregator_type=aggregator_type,
+                                  feat_drop=feat_drop)
         elif conv_type == 'gcn':
             self.conv1 = GraphConv(self.conv1d_output_size, hidden_dim)
             self.conv2 = GraphConv(hidden_dim, int(hidden_dim/2))
@@ -68,7 +73,11 @@ class NodeBinaryClassifier(nn.Module):
             self.conv1 = SGConv(self.conv1d_output_size, hidden_dim)
             self.conv2 = SGConv(hidden_dim, int(hidden_dim/2))
         elif conv_type == 'gat':
-            self.conv1 = GATConv(self.conv1d_output_size, hidden_dim, feat_drop=feat_drop, attn_drop=attn_drop, num_heads=num_heads)
+            self.conv1 = GATConv(self.conv1d_output_size,
+                                 hidden_dim,
+                                 feat_drop=feat_drop,
+                                 attn_drop=attn_drop,
+                                 num_heads=num_heads)
             self.conv2 = GATConv(hidden_dim*num_heads, int(hidden_dim/2), feat_drop=feat_drop, attn_drop=attn_drop,
                                  num_heads=num_heads)
 
@@ -162,14 +171,22 @@ class GraphBinaryClassifier(nn.Module):
         super().__init__()
 
         # Model layers
-        self.conv1d = Conv1d(in_channels=1, out_channels=1, kernel_size=conv1d_kernel_size, stride=conv1d_stride)
+        self.conv1d = Conv1d(in_channels=1,
+                             out_channels=1,
+                             kernel_size=conv1d_kernel_size,
+                             stride=conv1d_stride)
 
         self.conv1d_output_size = floor((input_dim - (conv1d_kernel_size-1) - 1)/conv1d_stride+1)
 
         if conv_type == 'sage':
-            self.conv1 = SAGEConv(self.conv1d_output_size, hidden_dim, aggregator_type=aggregator_type,
+            self.conv1 = SAGEConv(self.conv1d_output_size,
+                                  hidden_dim,
+                                  aggregator_type=aggregator_type,
                                   feat_drop=feat_drop)
-            self.conv2 = SAGEConv(hidden_dim, int(hidden_dim/2), aggregator_type=aggregator_type, feat_drop=feat_drop)
+            self.conv2 = SAGEConv(hidden_dim,
+                                  int(hidden_dim/2),
+                                  aggregator_type=aggregator_type,
+                                  feat_drop=feat_drop)
         elif conv_type == 'gcn':
             self.conv1 = GraphConv(self.conv1d_output_size, hidden_dim)
             self.conv2 = GraphConv(hidden_dim, int(hidden_dim/2))
@@ -177,8 +194,15 @@ class GraphBinaryClassifier(nn.Module):
             self.conv1 = SGConv(self.conv1d_output_size, hidden_dim)
             self.conv2 = SGConv(hidden_dim, int(hidden_dim/2))
         elif conv_type == 'gat':
-            self.conv1 = GATConv(self.conv1d_output_size, hidden_dim, feat_drop=feat_drop, attn_drop=attn_drop, num_heads=num_heads)
-            self.conv2 = GATConv(hidden_dim*num_heads, int(hidden_dim/2), feat_drop=feat_drop, attn_drop=attn_drop,
+            self.conv1 = GATConv(self.conv1d_output_size,
+                                 hidden_dim,
+                                 feat_drop=feat_drop,
+                                 attn_drop=attn_drop,
+                                 num_heads=num_heads)
+            self.conv2 = GATConv(hidden_dim*num_heads,
+                                 int(hidden_dim/2),
+                                 feat_drop=feat_drop,
+                                 attn_drop=attn_drop,
                                  num_heads=num_heads)
 
         self.conv_dropout = Dropout2d(p=conv_dropout_p)
