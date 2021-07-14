@@ -430,7 +430,7 @@ def node_classification_graph(mat_file_path,
         g = g.to(device)
 
         # Adding node features
-        g.nodes[:].data['x'] = torch.from_numpy(cores_data).type(torch.float32).to(device)
+        g.ndata['h'] = torch.from_numpy(cores_data).type(torch.float32)
 
     else:
         for idx in range(train_cores_num):

@@ -65,10 +65,6 @@ def main():
                         default=None,
                         choices=['graph', 'node'],
                         help='Indicates whether graph or node classification is performed')
-    parser.add_argument('--embeddings_path',
-                        type=str,
-                        default=None,
-                        help='Path to save node/graph embeddings to')
     parser.add_argument('--best_model_path',
                         type=str,
                         default='../model/model.pt',
@@ -86,6 +82,14 @@ def main():
                         default=None,
                         choices=['wandb', 'visdom'],
                         help='Tool used for visualization (visdom or wandb)')
+    parser.add_argument('--visdom_port',
+                        type=int,
+                        default=None,
+                        help='The port used by Visdom for plotting the data')
+    parser.add_argument('--wandb_user',
+                        type=str,
+                        default=None,
+                        help='Wandb user name if wandb is the visualization tool')
     args = parser.parse_args()
 
     # Common arguments
@@ -93,14 +97,23 @@ def main():
     best_model_path = args.best_model_path
     history_path = args.history_path
     checkpoint_path = args.checkpoint_path
-    embeddings_path = args.embeddings_path
     visualization_tool = args.visualization_tool
+    visdom_port = args.visdom_port
+    wandb_user = args.wandb_user
+
+    # Check if required arguments are passed
+    if (visualization_tool == 'visdom') and (visdom_port is None):
+        parser.error('--visualization_tool visdom requires --visdom_port')
+
+    if (visualization_tool == 'wandb') and (wandb_user is None):
+        parser.error('--visualization_tool wandb requires --wandb_user')
 
     # Parse config file
     config = configparser.ConfigParser()
     config.read('config.ini')
     train_params = config['node_classification_train_params']
 
+    # Shared params between node and graph classification
     mat_file_path = train_params['TimeSeriesMatFilePath']
     input_dim = int(train_params['SignalLength'])
     hidden_dim = int(train_params['HiddenDim'])
@@ -110,8 +123,6 @@ def main():
     gnn_type = train_params['GNNType']
     perform_pca = train_params.getboolean('PerformPCA')
     visualize = train_params.getboolean('Visualize')
-    visdom_port = int(train_params['VisdomPort'])
-    get_cancer_grade = train_params.getboolean('GetCancerGrade')
     fc_dropout_p = float(train_params['FCDropout'])
     conv_dropout_p = float(train_params['ConvDropout'])
     num_signals = int(train_params['NumSignals'])
@@ -123,11 +134,14 @@ def main():
     feat_drop = float(train_params['GNNFeatDrop'])
     attn_drop = float(train_params['GNNAttnDrop'])
     weighted = train_params.getboolean('WeightedGraph')
-
     if train_params['Threshold'] == 'None':
         threshold = None
     else:
         threshold = float(train_params['Threshold'])
+
+    # Graph specific params
+    if training_type == 'graph':
+        batch_size = int(train_params['BatchSize'])
 
     # Initialize visualization tool
     if visualize:
@@ -135,6 +149,27 @@ def main():
             vis = visdom.Visdom(port=visdom_port)
         elif visualization_tool == 'wandb':
             wandb.login()
+
+            wandb.init(entity=wandb_user,
+                       project='prostate_cancer_'+training_type+'_classification',
+                       config={
+                            'learning_rate': learning_rate,
+                            'architecture': gnn_type,
+                            'dataset': 'BK_RF_P1_140_balance__20210203-175808',
+                            'input_dim': input_dim,
+                            'hidden_dim': hidden_dim,
+                            'num_knn_neighbours': k,
+                            'fc_dropout_p': fc_dropout_p,
+                            'conv_dropout_p': conv_dropout_p,
+                            'num_signals': num_signals,
+                            'use_core_loc': use_core_loc,
+                            'conv1d_kernel_size': conv1d_kernel_size,
+                            'conv1d_stride': conv1d_stride,
+                            'num_heads': num_heads,
+                            'weight_decay': weight_decay,
+                            'feat_drop': feat_drop,
+                            'attn_drop': attn_drop,
+                            'weighted': weighted})
 
     # Check whether cuda is available or not
     use_cuda = torch.cuda.is_available()
@@ -269,9 +304,9 @@ def main():
         f_train_loss = open(history_path + "train_losses.txt", "a")
         f_train_acc = open(history_path + "train_accs.txt", "a")
         f_val_loss = open(history_path + "val_losses.txt", "a")
-        f_val_acc = open(history_path + "val_losses.txt", "a")
+        f_val_acc = open(history_path + "val_accs.txt", "a")
         f_test_loss = open(history_path + "test_losses.txt", "a")
-        f_test_acc = open(history_path + "test_losses.txt", "a")
+        f_test_acc = open(history_path + "test_accs.txt", "a")
 
         f = {'Training': {'loss': f_train_loss,
                           'acc': f_train_acc},
@@ -319,14 +354,17 @@ def main():
                                                 prediction[mask[phase]].cpu().detach().numpy())
 
                             # print epoch stat
-                            logger.info('{} epoch {}, loss {:.4f}, accuracy {: .4f}'.format(phase, epoch, loss.item(), acc))
+                            logger.info('{} epoch {}, loss {:.4f}, accuracy {: .4f}'.format(phase,
+                                                                                            epoch,
+                                                                                            loss.item(),
+                                                                                            acc))
 
                             # Save model checkpoint if validation accuracy has increased
                             if phase == 'Validation':
                                 if acc > max_val_acc:
                                     max_val_acc = acc
-                                    logger.warning("Accuracy increased ({:.4f}). Saving model to {}".format(max_val_acc,
-                                                                                                            best_model_path))
+                                    logger.warning("Acc increased ({:.4f}). Saving model to {}".format(max_val_acc,
+                                                                                                       best_model_path))
                                     save_checkpoint(epoch, model, optimizer, loss.item(), acc, best_model_path)
 
                             # Visualize the loss and accuracy
@@ -348,8 +386,17 @@ def main():
                                                        xlabel="Epoch",
                                                        ylabel="Accuracy"))
 
+                                if visualization_tool == 'wandb':
+                                    wandb.log({phase+' MAE Loss': loss.item(),
+                                               phase+' R2 Accuracy': acc})
+
                         t_end = datetime.now()
                         logger.info("it took {} for the epoch to finish".format(t_end-t_start))
+
+                        # Save to history if needed
+                        if history_path:
+                            f[phase]['loss'].write(str(loss.item())+'\n')
+                            f[phase]['acc'].write(str(acc)+'\n')
 
                     elif training_type == 'graph':
 
@@ -367,17 +414,8 @@ def main():
                             # Keep track of true label
                             y_true = np.append(y_true, label.cpu().detach().numpy())
 
-                            # Run the forward path
-                            if embeddings_path is not None:
-                                prediction = model(bg,
-                                                   epoch,
-                                                   label,
-                                                   cg,
-                                                   embeddings_path+"train")
-                                prediction = torch.flatten(prediction)
-                            else:
-                                prediction = model(bg)
-                                prediction = torch.flatten(prediction)
+                            prediction = model(bg)
+                            prediction = torch.flatten(prediction)
 
                             # Keep track of predicted scores
                             y_score = np.append(y_score, prediction.cpu().detach().numpy())
@@ -405,8 +443,8 @@ def main():
                         if phase == 'Validation':
                             if acc > max_val_acc:
                                 max_val_acc = acc
-                                logger.warning("Accuracy increased ({:.4f}). Saving model to {}".format(max_val_acc,
-                                                                                                        best_model_path))
+                                logger.warning("Acc increased ({:.4f}). Saving model to {}".format(max_val_acc,
+                                                                                                   best_model_path))
                                 save_checkpoint(epoch, model, optimizer, loss.item(), acc, best_model_path)
 
                         # Print elapsed time
@@ -432,10 +470,26 @@ def main():
                                                    xlabel="Epoch",
                                                    ylabel="Accuracy"))
 
+                            if visualization_tool == 'wandb':
+                                wandb.log({phase+' MAE Loss': epoch_loss,
+                                           phase+' R2 Accuracy': acc})
+
                         # Save to history if needed
                         if history_path:
-                            f[phase]['loss'].write(epoch_loss)
-                            f[phase]['acc'].write(acc)
+                            f[phase]['loss'].write(str(loss.item())+'\n')
+                            f[phase]['acc'].write(str(acc)+'\n')
+
+    # Close files
+    f['Training']['loss'].close()
+    f['Training']['acc'].close()
+    f['Validation']['loss'].close()
+    f['Validation']['acc'].close()
+    f['Test']['loss'].close()
+    f['Test']['acc'].close()
+
+    # Finish wandb session
+    if visualization_tool == 'wandb':
+        wandb.finish()
 
 
 if __name__ == "__main__":
