@@ -1,21 +1,32 @@
+from data import node_classification_graph, ProstateCancerDataset
+from model import NodeBinaryClassifier, GraphBinaryClassifier
 from data import collate
-import torch.nn as nn
-import torch.optim as optim
 from torch.utils.data import DataLoader
-from data import ProstateCancerDataset
+import torch.optim as optim
 import torch
-from model import GraphBinaryClassifier
-import argparse
+import torch.nn as nn
+import logging
+import numpy as np
 from sklearn.metrics import roc_auc_score
 from datetime import datetime
-import logging
-import visdom
 import configparser
-import numpy as np
+import argparse
+
+try:
+    import visdom
+except ImportError:
+    print('Visdom not installed (optional if visualization is not needed)')
+    pass
+
+try:
+    import wandb
+except ImportError:
+    print('Wandb not installed (optional if visualization is not needed)')
+    pass
 
 
+# Initialize logger
 logger_level = logging.INFO
-
 logger = logging.getLogger('gnn_prostate_cancer')
 logger.setLevel(logger_level)
 ch = logging.StreamHandler()
@@ -23,21 +34,24 @@ ch.setLevel(logger_level)
 logger.addHandler(ch)
 
 
-def save_checkpoint(epoch, model_state_dict, optimizer_state_dict, loss, path):
+def save_checkpoint(epoch, model, optimizer, loss, val_acc, path):
     """
     Saves model checkpoint for later training
     Parameters:
         epoch (int): Current epoch
-        model_state_dict (dict): State dictionary obtained from model.state_dict()
-        optimizer_state_dict (dict): State dictionary obtained from optimizer.state_dict()
-        loss (Tensor): current loss
+        model (Pytorch Model): Pytorch model to save
+        optimizer (Pytorch Optimizer): Pytorch optimizer to save
+        loss (float): Model's loss at checkpoint
+        val_acc (float): Model's validation accuracy at checkpoint
         path (str): Path to save the checkpoint to
     """
+
     torch.save({
         'epoch': epoch,
-        'model_state_dict': model_state_dict,
-        'optimizer_state_dict': optimizer_state_dict,
-        'loss': loss}, path)
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'loss': loss,
+        'val_acc': val_acc}, path)
 
     return
 
@@ -45,11 +59,16 @@ def save_checkpoint(epoch, model_state_dict, optimizer_state_dict, loss, path):
 def main():
 
     # Parse command line arguments
-    parser = argparse.ArgumentParser(description='GNN training on Prostate Cancer dataset (graph classification)')
+    parser = argparse.ArgumentParser(description='GNN training on Prostate Cancer dataset (node classification)')
+    parser.add_argument('--training_type',
+                        type=str,
+                        default=None,
+                        choices=['graph', 'node'],
+                        help='Indicates whether graph or node classification is performed')
     parser.add_argument('--embeddings_path',
                         type=str,
                         default=None,
-                        help='Path to save graph embeddings to')
+                        help='Path to save node/graph embeddings to')
     parser.add_argument('--best_model_path',
                         type=str,
                         default='../model/model.pt',
@@ -62,18 +81,25 @@ def main():
                         type=str,
                         default=None,
                         help='Path to pickle file to continue the training from')
+    parser.add_argument('--visualization_tool',
+                        type=str,
+                        default=None,
+                        choices=['wandb', 'visdom'],
+                        help='Tool used for visualization (visdom or wandb)')
     args = parser.parse_args()
 
     # Common arguments
+    training_type = args.training_type
     best_model_path = args.best_model_path
     history_path = args.history_path
     checkpoint_path = args.checkpoint_path
     embeddings_path = args.embeddings_path
+    visualization_tool = args.visualization_tool
 
     # Parse config file
     config = configparser.ConfigParser()
     config.read('config.ini')
-    train_params = config['graph_classification_train_params']
+    train_params = config['node_classification_train_params']
 
     mat_file_path = train_params['TimeSeriesMatFilePath']
     input_dim = int(train_params['SignalLength'])
@@ -84,25 +110,31 @@ def main():
     gnn_type = train_params['GNNType']
     perform_pca = train_params.getboolean('PerformPCA')
     visualize = train_params.getboolean('Visualize')
+    visdom_port = int(train_params['VisdomPort'])
     get_cancer_grade = train_params.getboolean('GetCancerGrade')
     fc_dropout_p = float(train_params['FCDropout'])
     conv_dropout_p = float(train_params['ConvDropout'])
+    num_signals = int(train_params['NumSignals'])
+    use_core_loc = train_params.getboolean('UseCoreLocationGraph')
     conv1d_kernel_size = int(train_params['1DConvKernelSize'])
     conv1d_stride = int(train_params['1DConvStrideSize'])
     num_heads = int(train_params['NumGATHeads'])
     weight_decay = float(train_params['WeightDecay'])
     feat_drop = float(train_params['GNNFeatDrop'])
     attn_drop = float(train_params['GNNAttnDrop'])
-    weighted =  train_params.getboolean('WeightedGraph')
+    weighted = train_params.getboolean('WeightedGraph')
 
     if train_params['Threshold'] == 'None':
         threshold = None
     else:
         threshold = float(train_params['Threshold'])
 
-    # Use visdom for online visualization
+    # Initialize visualization tool
     if visualize:
-        vis = visdom.Visdom(port=8150)
+        if visualization_tool == 'visdom':
+            vis = visdom.Visdom(port=visdom_port)
+        elif visualization_tool == 'wandb':
+            wandb.login()
 
     # Check whether cuda is available or not
     use_cuda = torch.cuda.is_available()
@@ -113,63 +145,102 @@ def main():
     torch.manual_seed(0)
     np.random.seed(0)
 
-    # Load the train dataset
-    dataset_train = ProstateCancerDataset(mat_file_path=mat_file_path,
-                                          mode='train',
-                                          weighted=weighted,
-                                          k=k,
-                                          knn_n_jobs=1,
-                                          cuda_knn=use_cuda,
-                                          threshold=threshold,
-                                          perform_pca=perform_pca,
-                                          num_pca_components=input_dim)
+    # Load the dataset and prepare model based on training type
+    if training_type == 'node':
+        # training, validation and test nodes are all on the same graph
+        g, labels, mask, _cgs = node_classification_graph(mat_file_path=mat_file_path,
+                                                          weighted=weighted,
+                                                          k=k,
+                                                          knn_n_jobs=1,
+                                                          cuda_knn=use_cuda,
+                                                          threshold=threshold,
+                                                          perform_pca=perform_pca,
+                                                          num_pca_components=input_dim,
+                                                          core_location_graph=use_core_loc,
+                                                          num_signals=num_signals)
 
-    dataset_train_len = len(dataset_train)
-    train_data_loader = DataLoader(dataset_train, shuffle=True, batch_size=3, collate_fn=collate)
-    logger.info("Training dataset has {} samples".format(dataset_train_len))
+        # Initialize model
+        model = NodeBinaryClassifier(input_dim=input_dim,
+                                     hidden_dim=hidden_dim,
+                                     feat_drop=feat_drop,
+                                     use_cuda=use_cuda,
+                                     attn_drop=attn_drop,
+                                     conv_type=gnn_type,
+                                     fc_dropout_p=fc_dropout_p,
+                                     conv_dropout_p=conv_dropout_p,
+                                     num_signal_channels=num_signals,
+                                     core_location_graph=use_core_loc,
+                                     conv1d_kernel_size=conv1d_kernel_size,
+                                     conv1d_stride=conv1d_stride,
+                                     num_heads=num_heads)
+    elif 'graph':
 
-    # Load the validation dataset
-    dataset_val = ProstateCancerDataset(mat_file_path=mat_file_path,
-                                        mode='val',
-                                        weighted=weighted,
-                                        k=k,
-                                        knn_n_jobs=1,
-                                        cuda_knn=use_cuda,
-                                        threshold=threshold,
-                                        perform_pca=perform_pca,
-                                        num_pca_components=input_dim)
+        # Load the train dataset
+        dataset_train = ProstateCancerDataset(mat_file_path=mat_file_path,
+                                              mode='train',
+                                              weighted=weighted,
+                                              k=k,
+                                              knn_n_jobs=1,
+                                              cuda_knn=use_cuda,
+                                              threshold=threshold,
+                                              perform_pca=perform_pca,
+                                              num_pca_components=input_dim)
 
-    val_set_len = len(dataset_val)
-    val_data_loader = DataLoader(dataset_val, shuffle=True, collate_fn=collate)
-    logger.info("Validation dataset has {} samples.".format(val_set_len))
+        train_set_len = len(dataset_train)
+        train_data_loader = DataLoader(dataset_train, shuffle=True, batch_size=3, collate_fn=collate)
+        logger.info("Training dataset has {} samples".format(train_set_len))
 
-    # Load the test dataset if provided
-    dataset_test = ProstateCancerDataset(mat_file_path=mat_file_path,
-                                         mode='test',
-                                         weighted=weighted,
-                                         k=k,
-                                         knn_n_jobs=1,
-                                         cuda_knn=use_cuda,
-                                         threshold=threshold,
-                                         perform_pca=perform_pca,
-                                         num_pca_components=input_dim)
+        # Load the validation dataset
+        dataset_val = ProstateCancerDataset(mat_file_path=mat_file_path,
+                                            mode='val',
+                                            weighted=weighted,
+                                            k=k,
+                                            knn_n_jobs=1,
+                                            cuda_knn=use_cuda,
+                                            threshold=threshold,
+                                            perform_pca=perform_pca,
+                                            num_pca_components=input_dim)
 
-    test_set_len = len(dataset_test)
-    test_data_loader = DataLoader(dataset_test, shuffle=True, collate_fn=collate)
-    logger.info("Test dataset has {} samples.".format(test_set_len))
+        val_set_len = len(dataset_val)
+        val_data_loader = DataLoader(dataset_val, shuffle=True, collate_fn=collate)
+        logger.info("Validation dataset has {} samples.".format(val_set_len))
 
-    # Initialize model
-    model = GraphBinaryClassifier(input_dim=input_dim,
-                                  hidden_dim=hidden_dim,
-                                  feat_drop=feat_drop,
-                                  use_cuda=use_cuda,
-                                  attn_drop=attn_drop,
-                                  conv_type=gnn_type,
-                                  fc_dropout_p=fc_dropout_p,
-                                  conv_dropout_p=conv_dropout_p,
-                                  conv1d_kernel_size=conv1d_kernel_size,
-                                  conv1d_stride=conv1d_stride,
-                                  num_heads=num_heads)
+        # Load the test dataset if provided
+        dataset_test = ProstateCancerDataset(mat_file_path=mat_file_path,
+                                             mode='test',
+                                             weighted=weighted,
+                                             k=k,
+                                             knn_n_jobs=1,
+                                             cuda_knn=use_cuda,
+                                             threshold=threshold,
+                                             perform_pca=perform_pca,
+                                             num_pca_components=input_dim)
+
+        test_set_len = len(dataset_test)
+        test_data_loader = DataLoader(dataset_test, shuffle=True, collate_fn=collate)
+        logger.info("Test dataset has {} samples.".format(test_set_len))
+
+        # Dictionary holding the dataloader
+        dataloaders = {'Training': train_data_loader,
+                       'Validation': val_data_loader,
+                       'Test': test_data_loader}
+
+        dataset_lens = {'Training': train_set_len,
+                        'Validation': val_set_len,
+                        'Test': test_set_len}
+
+        # Initialize model
+        model = GraphBinaryClassifier(input_dim=input_dim,
+                                      hidden_dim=hidden_dim,
+                                      feat_drop=feat_drop,
+                                      use_cuda=use_cuda,
+                                      attn_drop=attn_drop,
+                                      conv_type=gnn_type,
+                                      fc_dropout_p=fc_dropout_p,
+                                      conv_dropout_p=conv_dropout_p,
+                                      conv1d_kernel_size=conv1d_kernel_size,
+                                      conv1d_stride=conv1d_stride,
+                                      num_heads=num_heads)
 
     # Initialize loss function and optimizer
     loss_func = nn.BCEWithLogitsLoss()
@@ -179,262 +250,192 @@ def main():
     starting_epoch = 0
 
     # Load saved parameters if available
+    max_val_acc = 0
     if checkpoint_path:
         checkpoint = torch.load(checkpoint_path)
         model.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         starting_epoch = checkpoint['epoch'] + 1
         loss = checkpoint['loss']
+        max_val_acc = checkpoint['val_acc']
 
-        logger.info("Resuming from epoch: {} with loss: {}".format(starting_epoch, loss.item()))
+        logger.info("Resuming from epoch: {} with loss: {}".format(starting_epoch, loss))
 
-    # Move model to GPU if available
-    if use_cuda:
-        model = model.cuda()
+    # Move model to available device
+    model.to(device)
 
-    # Loss and accuracy variables
-    train_losses = []
-    train_accs = []
-    loss = 0
+    # Open history files if needed
+    if history_path:
+        f_train_loss = open(history_path + "train_losses.txt", "a")
+        f_train_acc = open(history_path + "train_accs.txt", "a")
+        f_val_loss = open(history_path + "val_losses.txt", "a")
+        f_val_acc = open(history_path + "val_losses.txt", "a")
+        f_test_loss = open(history_path + "test_losses.txt", "a")
+        f_test_acc = open(history_path + "test_losses.txt", "a")
 
-    max_val_acc = 0
-    val_accs = []
-    val_losses = []
+        f = {'Training': {'loss': f_train_loss,
+                          'acc': f_train_acc},
+             'Validation': {'loss': f_val_loss,
+                            'acc': f_val_acc},
+             'Test': {'loss': f_test_loss,
+                      'acc': f_test_acc}}
 
-    test_accs = []
-    test_losses = []
-
+    # Start the training loop
     for epoch in range(starting_epoch, epochs):
 
-        t_start = datetime.now()
-
-        y_true = np.empty((0,3))
-        y_score = np.empty((0,3))
-
-        # Put model in train model
-        model.train()
-
-        epoch_loss = 0
-        for bg, label, cg in train_data_loader:
-            # Move label and graph to GPU if available
-            if use_cuda:
-                torch.cuda.empty_cache()
-                label = label.to(device)
-
-            y_true = np.append(y_true, label.cpu().detach().numpy())
-
-            # Predict labels
-            if embeddings_path is not None:
-                prediction = model(bg,
-                                   epoch,
-                                   label,
-                                   cg,
-                                   embeddings_path+"train")
-                prediction = torch.flatten(prediction)
+        for phase in ['Training', 'Validation', 'Test']:
+            if phase == 'training':
+                model.train()
             else:
-                prediction = model(bg)
-                prediction = torch.flatten(prediction)
+                model.eval()
 
-            y_score = np.append(y_score, prediction.cpu().detach().numpy())
-
-            # Compute loss
-            loss = loss_func(prediction, label)
-
-            # Zero gradients
-            optimizer.zero_grad()
-
-            # Back propagate
-            loss.backward()
-
-            # Do one optimization step
-            optimizer.step()
-
-            # Accumulate epoch loss
-            epoch_loss += loss.detach().item()
-
-        # Find and print average epoch loss
-        epoch_loss /= dataset_train_len
-        logger.info('Training epoch {}, loss {:.4f}'.format(epoch, epoch_loss))
-        train_losses.append(epoch_loss)
-        acc = roc_auc_score(y_true, y_score)
-        logger.info("Training accuracy {:.4f}".format(acc))
-        train_accs.append(acc)
-
-        t_end = datetime.now()
-        logger.info("it took {} for the training epoch to finish".format(t_end-t_start))
-
-        # Visualize the loss and accuracy
-        if visualize:
-            vis.line(Y=torch.reshape(torch.tensor(epoch_loss), (-1, )), X=torch.reshape(torch.tensor(epoch), (-1, )),
-                     update='append', win='tain_loss',
-                     opts=dict(title="Train Losses Per Epoch", xlabel="Epoch", ylabel="Loss"))
-
-            vis.line(Y=torch.reshape(torch.tensor(acc), (-1, )), X=torch.reshape(torch.tensor(epoch), (-1, )),
-                     update='append', win='train_acc',
-                     opts=dict(title="Train Accuracy Per Epoch", xlabel="Epoch", ylabel="Accuracy"))
-
-        # Save to history if needed
-        if history_path:
-            f = open(history_path+"train_losses.txt", "w")
-            for ele in train_losses:
-                f.write(str(ele) + "\n")
-            f.close()
-
-            f = open(history_path + "train_accs.txt", "w")
-            for ele in train_accs:
-                f.write(str(ele) + "\n")
-            f.close()
-
-        # Put model in evaluation mode
-        model.eval()
-        t_start = datetime.now()
-
-        with torch.no_grad():
-            y_true = np.empty((0,3))
-            y_score = np.empty((0,3))
-            validation_loss = 0
-            # noinspection PyUnboundLocalVariable
-            for bg, label, cg in val_data_loader:
-                # Move label and graph to GPU if available
                 if use_cuda:
                     torch.cuda.empty_cache()
-                    label = label.to(device)
 
-                y_true = np.append(y_true, label.cpu().detach().numpy())
+                # Zero parameter gradients
+                optimizer.zero_grad()
 
-                # Predict labels
-                if embeddings_path is not None:
-                    prediction = model(bg,
-                                       epoch,
-                                       label,
-                                       cg,
-                                       embeddings_path+"val")
-                    prediction = torch.flatten(prediction)
-                else:
-                    prediction = model(bg)
-                    prediction = torch.flatten(prediction)
+                with torch.set_grad_enabled(phase == 'Training'):
 
-                y_score = np.append(y_score, prediction.cpu().detach().numpy())
+                    if training_type == 'node':
 
-                # Compute loss
-                loss = loss_func(prediction, label)
+                        t_start = datetime.now()
 
-                # Accumulate validation loss
-                validation_loss += loss.detach().item()
+                        # Run the forward path
+                        prediction = model(g)
 
-            # Compute and print validation loss
-            validation_loss /= val_set_len
-            logger.info('Validation loss {:.4f}'.format(validation_loss))
-            # noinspection PyUnboundLocalVariable
-            val_losses.append(validation_loss)
-            acc = roc_auc_score(y_true, y_score)
-            logger.info("Validation accuracy {:.4f}".format(acc))
-            # noinspection PyUnboundLocalVariable
-            val_accs.append(acc)
+                        # Compute loss
+                        loss = loss_func(prediction[mask[phase]], labels[mask[phase]])
 
-            # Print elapsed time
-            t_end = datetime.now()
-            logger.info("it took {} for the validation set.".format(t_end - t_start))
+                        if phase == 'Training':
+                            # Back propagate
+                            loss.backward()
+                            # Do one optimization step
+                            optimizer.step()
 
-            # Visualize the loss and accuracy
-            if visualize:
-                vis.line(Y=torch.reshape(torch.tensor(validation_loss), (-1,)), X=torch.reshape(torch.tensor(epoch), (-1,)),
-                         update='append', win='val_loss',
-                         opts=dict(title="Validation Losses Per Epoch", xlabel="Epoch", ylabel="Loss"))
+                        with torch.no_grad():
+                            # Compute accuracy
+                            acc = roc_auc_score(labels[mask[phase]].cpu().detach().numpy(),
+                                                prediction[mask[phase]].cpu().detach().numpy())
 
-                vis.line(Y=torch.reshape(torch.tensor(acc), (-1,)), X=torch.reshape(torch.tensor(epoch), (-1,)),
-                         update='append', win='val_acc',
-                         opts=dict(title="Validation Accuracy Per Epoch", xlabel="Epoch", ylabel="Accuracy"))
+                            # print epoch stat
+                            logger.info('{} epoch {}, loss {:.4f}, accuracy {: .4f}'.format(phase, epoch, loss.item(), acc))
 
-            # Save to history if needed
-            if history_path:
-                f = open(history_path + "val_losses.txt", "w")
-                for ele in val_losses:
-                    f.write(str(ele) + "\n")
-                f.close()
+                            # Save model checkpoint if validation accuracy has increased
+                            if phase == 'Validation':
+                                if acc > max_val_acc:
+                                    max_val_acc = acc
+                                    logger.warning("Accuracy increased ({:.4f}). Saving model to {}".format(max_val_acc,
+                                                                                                            best_model_path))
+                                    save_checkpoint(epoch, model, optimizer, loss.item(), acc, best_model_path)
 
-                f = open(history_path + "val_accs.txt", "w")
-                for ele in val_accs:
-                    f.write(str(ele) + "\n")
-                f.close()
+                            # Visualize the loss and accuracy
+                            if visualize:
+                                if visualization_tool == 'visdom':
+                                    vis.line(Y=torch.reshape(torch.tensor(loss.item()), (-1, )),
+                                             X=torch.reshape(torch.tensor(epoch), (-1, )),
+                                             update='append',
+                                             win=phase+'_loss',
+                                             opts=dict(title=phase+' Loss Per Epoch',
+                                                       xlabel='Epoch',
+                                                       ylabel='Loss'))
 
-            if acc > max_val_acc:
-                max_val_acc = acc
-                # Save model checkpoint if validation accuracy has increased
-                logger.warning("Validation accuracy increased ({:.4f}). Saving model to {}".format(max_val_acc, best_model_path))
-                save_checkpoint(epoch, model.state_dict(), optimizer.state_dict(), loss, best_model_path)
+                                    vis.line(Y=torch.reshape(torch.tensor(acc), (-1, )),
+                                             X=torch.reshape(torch.tensor(epoch), (-1, )),
+                                             update='append',
+                                             win=phase+'_acc',
+                                             opts=dict(title=phase+"Accuracy Per Epoch",
+                                                       xlabel="Epoch",
+                                                       ylabel="Accuracy"))
 
-        t_start = datetime.now()
+                        t_end = datetime.now()
+                        logger.info("it took {} for the epoch to finish".format(t_end-t_start))
 
-        with torch.no_grad():
-            y_true = np.empty((0,3))
-            y_score = np.empty((0,3))
-            test_loss = 0
-            # noinspection PyUnboundLocalVariable
-            for bg, label, cg in test_data_loader:
-                # Move label and graph to GPU if available
-                if use_cuda:
-                    torch.cuda.empty_cache()
-                    label = label.to(device)
+                    elif training_type == 'graph':
 
-                y_true = np.append(y_true, label.cpu().detach().numpy())
+                        t_start = datetime.now()
 
-                # Predict labels
-                if embeddings_path is not None:
-                    prediction = model(bg,
-                                       epoch,
-                                       label,
-                                       cg,
-                                       embeddings_path+"test")
-                    prediction = torch.flatten(prediction)
-                else:
-                    prediction = model(bg)
-                    prediction = torch.flatten(prediction)
+                        y_true = np.empty((0, 3))
+                        y_score = np.empty((0, 3))
 
-                y_score = np.append(y_score, prediction.cpu().detach().numpy())
+                        epoch_loss = 0
 
-                # Compute loss
-                loss = loss_func(prediction, label)
+                        for bg, label, cg in dataloaders[phase]:
 
-                # Accumulate validation loss
-                test_loss += loss.detach().item()
+                            label.to(device)
 
-            # Compute and print validation loss
-            # noinspection PyUnboundLocalVariable
-            test_loss /= test_set_len
-            logger.info('Test loss {:.4f}'.format(test_loss))
-            # noinspection PyUnboundLocalVariable
-            test_losses.append(test_loss)
-            acc = roc_auc_score(y_true, y_score)
-            logger.info("Test accuracy {:.4f}".format(acc))
-            # noinspection PyUnboundLocalVariable
-            test_accs.append(acc)
+                            # Keep track of true label
+                            y_true = np.append(y_true, label.cpu().detach().numpy())
 
-            # Print elapsed time
-            t_end = datetime.now()
-            logger.info("it took {} for the test set.".format(t_end - t_start))
+                            # Run the forward path
+                            if embeddings_path is not None:
+                                prediction = model(bg,
+                                                   epoch,
+                                                   label,
+                                                   cg,
+                                                   embeddings_path+"train")
+                                prediction = torch.flatten(prediction)
+                            else:
+                                prediction = model(bg)
+                                prediction = torch.flatten(prediction)
 
-            # Visualize the loss and accuracy
-            if visualize:
-                vis.line(Y=torch.reshape(torch.tensor(test_loss), (-1,)), X=torch.reshape(torch.tensor(epoch), (-1,)),
-                         update='append', win='test_loss',
-                         opts=dict(title="Test Losses Per Epoch", xlabel="Epoch", ylabel="Loss"))
+                            # Keep track of predicted scores
+                            y_score = np.append(y_score, prediction.cpu().detach().numpy())
 
-                vis.line(Y=torch.reshape(torch.tensor(acc), (-1,)), X=torch.reshape(torch.tensor(epoch), (-1,)),
-                         update='append', win='test_acc',
-                         opts=dict(title="Test Accuracy Per Epoch", xlabel="Epoch", ylabel="Accuracy"))
+                            # Compute loss
+                            loss = loss_func(prediction, label)
 
-            # Save to history if needed
-            if history_path:
-                f = open(history_path + "test_losses.txt", "w")
-                for ele in test_losses:
-                    f.write(str(ele) + "\n")
-                f.close()
+                            if phase == 'Training':
+                                # Back propagate
+                                loss.backward()
+                                # Do one optimization step
+                                optimizer.step()
 
-                f = open(history_path + "test_accs.txt", "w")
-                for ele in test_accs:
-                    f.write(str(ele) + "\n")
-                f.close()
+                        # Accumulate epoch loss
+                        epoch_loss += loss.detach().item()
+
+                        # Find and print average epoch loss
+                        epoch_loss /= dataset_lens[phase]
+                        acc = roc_auc_score(y_true, y_score)
+
+                        # print epoch stat
+                        logger.info('{} epoch {}, loss {:.4f}, accuracy {: .4f}'.format(phase, epoch, epoch_loss, acc))
+
+                        # Save model checkpoint if validation accuracy has increased
+                        if phase == 'Validation':
+                            if acc > max_val_acc:
+                                max_val_acc = acc
+                                logger.warning("Accuracy increased ({:.4f}). Saving model to {}".format(max_val_acc,
+                                                                                                        best_model_path))
+                                save_checkpoint(epoch, model, optimizer, loss.item(), acc, best_model_path)
+
+                        # Print elapsed time
+                        t_end = datetime.now()
+                        logger.info("it took {} for the {} set.".format(t_end - t_start, phase))
+
+                        # Visualize the loss and accuracy
+                        if visualize:
+                            if visualization_tool == 'visdom':
+                                vis.line(Y=torch.reshape(torch.tensor(epoch_loss), (-1, )),
+                                         X=torch.reshape(torch.tensor(epoch), (-1, )),
+                                         update='append',
+                                         win=phase+'_loss',
+                                         opts=dict(title=phase+' Loss Per Epoch',
+                                                   xlabel='Epoch',
+                                                   ylabel='Loss'))
+
+                                vis.line(Y=torch.reshape(torch.tensor(acc), (-1, )),
+                                         X=torch.reshape(torch.tensor(epoch), (-1, )),
+                                         update='append',
+                                         win=phase+'_acc',
+                                         opts=dict(title=phase+"Accuracy Per Epoch",
+                                                   xlabel="Epoch",
+                                                   ylabel="Accuracy"))
+
+                        # Save to history if needed
+                        if history_path:
+                            f[phase]['loss'].write(epoch_loss)
+                            f[phase]['acc'].write(acc)
 
 
 if __name__ == "__main__":

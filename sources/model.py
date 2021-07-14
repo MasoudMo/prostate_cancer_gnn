@@ -92,7 +92,7 @@ class NodeBinaryClassifier(nn.Module):
             g (DGL Graph): Input graph
         """
         # Use RF signals as node features
-        h = g.ndata['x']
+        h = g.ndata['h']
 
         if self.use_cuda:
             h = h.cuda()
@@ -203,7 +203,7 @@ class GraphBinaryClassifier(nn.Module):
             g (DGL Graph): Input graph
         """
         # Use RF signals as node features
-        h = g.ndata['x']
+        h = g.ndata['h']
 
         if self.use_cuda:
             h = h.cuda()
@@ -225,10 +225,10 @@ class GraphBinaryClassifier(nn.Module):
             h = torch.mean(h, dim=1)
 
         # Use the mean of hidden embeddings to find graph embedding
-        h = self.global_pool(g, h)
+        hg = self.global_pool(g, h)
 
         # Fully connected output layer
-        h = F.relu(self.fc_dropout(self.fc_1(h)))
+        h = F.relu(self.fc_dropout(self.fc_1(hg)))
         h = F.relu(self.fc_dropout(self.fc_2(h)))
         h = self.fc_3(h)
 
