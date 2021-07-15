@@ -1,7 +1,0 @@
-Training:
-
---mat_file_path "../data/BK_RF_P1_90_MICCAI_33.mat" --test_mat_file_path "../data/BK_RF_P91_110.mat" --test_fft_mat_file_path "../data/BK_RF_FFT_resmp_2_100_P91_110.mat" --fft_mat_file_path "../data/BK_FFT_P1_90_MICCAI_33.mat" --input_dim 20 --hidden_dim 12 --learning_rate 0.001 --val_split 0 --epochs 100 --k 10 --weighted True --knn_n_jobs 5 --best_model_path "../model/best_model.pt" --history_path "../logs/0-" --gnn_type "gcn" --feat_drop 0 --attn_drop 0 --threshold 100 --perform_pca True
-
-Testing:
-
---mat_file_path "../data/BK_RF_P91_110.mat" --fft_mat_file_path "../data/BK_RF_FFT_resmp_2_100_P91_110.mat" --input_dim 20 --hidden_dim 12 --k 10 --weighted True --knn_n_jobs 5 --model_path "../model/best_model.pt" --gnn_type "gcn" --threshold 100 --perform_pca True
