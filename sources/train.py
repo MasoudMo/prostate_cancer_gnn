@@ -111,7 +111,11 @@ def main():
     # Parse config file
     config = configparser.ConfigParser()
     config.read('config.ini')
-    train_params = config['node_classification_train_params']
+
+    if training_type == 'node':
+        train_params = config['node_classification_train_params']
+    elif training_type == 'graph':
+        train_params = config['graph_classification_train_params']
 
     # Shared params between node and graph classification
     mat_file_path = train_params['TimeSeriesMatFilePath']
@@ -125,7 +129,6 @@ def main():
     visualize = train_params.getboolean('Visualize')
     fc_dropout_p = float(train_params['FCDropout'])
     conv_dropout_p = float(train_params['ConvDropout'])
-    num_signals = int(train_params['NumSignals'])
     use_core_loc = train_params.getboolean('UseCoreLocationGraph')
     conv1d_kernel_size = int(train_params['1DConvKernelSize'])
     conv1d_stride = int(train_params['1DConvStrideSize'])
@@ -142,6 +145,8 @@ def main():
     # Graph specific params
     if training_type == 'graph':
         batch_size = int(train_params['BatchSize'])
+    elif training_type == 'node':
+        num_signals = int(train_params['NumSignals'])
 
     # Initialize visualization tool
     if visualize:
@@ -222,7 +227,12 @@ def main():
                                               num_pca_components=input_dim)
 
         train_set_len = len(dataset_train)
-        train_data_loader = DataLoader(dataset_train, shuffle=True, batch_size=3, collate_fn=collate)
+        train_data_loader = DataLoader(dataset_train,
+                                       shuffle=True,
+                                       batch_size=batch_size,
+                                       collate_fn=collate,
+                                       drop_last=True)
+
         logger.info("Training dataset has {} samples".format(train_set_len))
 
         # Load the validation dataset
@@ -237,7 +247,12 @@ def main():
                                             num_pca_components=input_dim)
 
         val_set_len = len(dataset_val)
-        val_data_loader = DataLoader(dataset_val, shuffle=True, collate_fn=collate)
+        val_data_loader = DataLoader(dataset_val,
+                                     shuffle=True,
+                                     collate_fn=collate,
+                                     batch_size=batch_size,
+                                     drop_last=True)
+
         logger.info("Validation dataset has {} samples.".format(val_set_len))
 
         # Load the test dataset if provided
@@ -252,7 +267,12 @@ def main():
                                              num_pca_components=input_dim)
 
         test_set_len = len(dataset_test)
-        test_data_loader = DataLoader(dataset_test, shuffle=True, collate_fn=collate)
+        test_data_loader = DataLoader(dataset_test,
+                                      shuffle=True,
+                                      collate_fn=collate,
+                                      batch_size=batch_size,
+                                      drop_last=True)
+
         logger.info("Test dataset has {} samples.".format(test_set_len))
 
         # Dictionary holding the dataloader
