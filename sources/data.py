@@ -199,15 +199,15 @@ def node_classification_graph(mat_file_path,
         g = dgl.from_scipy(graph)
         g = dgl.add_self_loop(g)
 
+        # Move graph to available device
+        g = g.to(device)
+        labels = labels.to(device)
+
         # Put time domain signals as node features
         if perform_pca:
-            g.ndata['h'] = torch.from_numpy(reduced_data)
+            g.ndata['h'] = torch.from_numpy(reduced_data).to(device)
         else:
-            g.ndata['h'] = torch.from_numpy(cores_data)
-
-        # Move graph to available device
-        g.to(device)
-        labels.to(device)
+            g.ndata['h'] = torch.from_numpy(cores_data).to(device)
 
     return g, labels, mask, cgs
 
@@ -352,14 +352,13 @@ class ProstateCancerDataset(Dataset):
         # Create a dgl graph from coo_matrix
         g = dgl.from_scipy(graph)
         g = dgl.add_self_loop(g)
+        g = g.to(self.device)
 
         # Put time domain signals as node features
         if self.perform_pca:
-            g.ndata['h'] = torch.from_numpy(reduced_data)
+            g.ndata['h'] = torch.from_numpy(reduced_data).to(self.device)
         else:
-            g.ndata['h'] = torch.from_numpy(data)
-
-        g.to(self.device)
+            g.ndata['h'] = torch.from_numpy(data).to(self.device)
 
         return g, label, cg
 

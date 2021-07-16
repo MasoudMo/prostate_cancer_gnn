@@ -11,6 +11,7 @@ from sklearn.metrics import roc_auc_score
 from datetime import datetime
 import configparser
 import argparse
+from math import floor
 
 try:
     import visdom
@@ -155,26 +156,47 @@ def main():
         elif visualization_tool == 'wandb':
             wandb.login()
 
-            wandb.init(entity=wandb_user,
-                       project='prostate_cancer_'+training_type+'_classification',
-                       config={
-                            'learning_rate': learning_rate,
-                            'architecture': gnn_type,
-                            'dataset': 'BK_RF_P1_140_balance__20210203-175808',
-                            'input_dim': input_dim,
-                            'hidden_dim': hidden_dim,
-                            'num_knn_neighbours': k,
-                            'fc_dropout_p': fc_dropout_p,
-                            'conv_dropout_p': conv_dropout_p,
-                            'num_signals': num_signals,
-                            'use_core_loc': use_core_loc,
-                            'conv1d_kernel_size': conv1d_kernel_size,
-                            'conv1d_stride': conv1d_stride,
-                            'num_heads': num_heads,
-                            'weight_decay': weight_decay,
-                            'feat_drop': feat_drop,
-                            'attn_drop': attn_drop,
-                            'weighted': weighted})
+            if training_type == 'node':
+                wandb.init(entity=wandb_user,
+                        project='prostate_cancer_node_classification',
+                        config={
+                                'learning_rate': learning_rate,
+                                'architecture': gnn_type,
+                                'dataset': 'BK_RF_P1_140_balance__20210203-175808',
+                                'input_dim': input_dim,
+                                'hidden_dim': hidden_dim,
+                                'num_knn_neighbours': k,
+                                'fc_dropout_p': fc_dropout_p,
+                                'conv_dropout_p': conv_dropout_p,
+                                'num_signals': num_signals,
+                                'use_core_loc': use_core_loc,
+                                'conv1d_kernel_size': conv1d_kernel_size,
+                                'conv1d_stride': conv1d_stride,
+                                'num_heads': num_heads,
+                                'weight_decay': weight_decay,
+                                'feat_drop': feat_drop,
+                                'attn_drop': attn_drop,
+                                'weighted': weighted})
+            elif training_type == 'graph':
+                wandb.init(entity=wandb_user,
+                        project='prostate_cancer_graph_classification',
+                        config={
+                                'learning_rate': learning_rate,
+                                'architecture': gnn_type,
+                                'dataset': 'BK_RF_P1_140_balance__20210203-175808',
+                                'input_dim': input_dim,
+                                'hidden_dim': hidden_dim,
+                                'num_knn_neighbours': k,
+                                'fc_dropout_p': fc_dropout_p,
+                                'conv_dropout_p': conv_dropout_p,
+                                'use_core_loc': use_core_loc,
+                                'conv1d_kernel_size': conv1d_kernel_size,
+                                'conv1d_stride': conv1d_stride,
+                                'num_heads': num_heads,
+                                'weight_decay': weight_decay,
+                                'feat_drop': feat_drop,
+                                'attn_drop': attn_drop,
+                                'weighted': weighted})
 
     # Check whether cuda is available or not
     use_cuda = torch.cuda.is_available()
@@ -209,7 +231,6 @@ def main():
                                      fc_dropout_p=fc_dropout_p,
                                      conv_dropout_p=conv_dropout_p,
                                      num_signal_channels=num_signals,
-                                     core_location_graph=use_core_loc,
                                      conv1d_kernel_size=conv1d_kernel_size,
                                      conv1d_stride=conv1d_stride,
                                      num_heads=num_heads)
@@ -407,8 +428,8 @@ def main():
                                                        ylabel="Accuracy"))
 
                                 if visualization_tool == 'wandb':
-                                    wandb.log({phase+' MAE Loss': loss.item(),
-                                               phase+' R2 Accuracy': acc})
+                                    wandb.log({phase+' BCE Loss': loss.item(),
+                                               phase+' AUC ROC Accuracy': acc})
 
                         t_end = datetime.now()
                         logger.info("it took {} for the epoch to finish".format(t_end-t_start))
@@ -429,7 +450,8 @@ def main():
 
                         for bg, label, cg in dataloaders[phase]:
 
-                            label.to(device)
+                            label = label.to(device)
+                            bg = bg.to(device)
 
                             # Keep track of true label
                             y_true = np.append(y_true, label.cpu().detach().numpy())
@@ -449,11 +471,11 @@ def main():
                                 # Do one optimization step
                                 optimizer.step()
 
-                        # Accumulate epoch loss
-                        epoch_loss += loss.detach().item()
+                            # Accumulate epoch loss
+                            epoch_loss += loss.detach().item()
 
                         # Find and print average epoch loss
-                        epoch_loss /= dataset_lens[phase]
+                        epoch_loss /= floor(dataset_lens[phase]/batch_size)
                         acc = roc_auc_score(y_true, y_score)
 
                         # print epoch stat
@@ -491,8 +513,8 @@ def main():
                                                    ylabel="Accuracy"))
 
                             if visualization_tool == 'wandb':
-                                wandb.log({phase+' MAE Loss': epoch_loss,
-                                           phase+' R2 Accuracy': acc})
+                                wandb.log({phase+' BCE Loss': epoch_loss,
+                                           phase+' AUC ROC Accuracy': acc})
 
                         # Save to history if needed
                         if history_path:
