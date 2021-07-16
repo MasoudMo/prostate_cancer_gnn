@@ -148,6 +148,7 @@ def main():
         batch_size = int(train_params['BatchSize'])
     elif training_type == 'node':
         num_signals = int(train_params['NumSignals'])
+        signal_level_graph = train_params.getboolean('SignalLevelGraph')
 
     # Initialize visualization tool
     if visualize:
@@ -176,7 +177,8 @@ def main():
                                 'weight_decay': weight_decay,
                                 'feat_drop': feat_drop,
                                 'attn_drop': attn_drop,
-                                'weighted': weighted})
+                                'weighted': weighted,
+                                'signal_level_graph': signal_level_graph})
             elif training_type == 'graph':
                 wandb.init(entity=wandb_user,
                         project='prostate_cancer_graph_classification',
@@ -219,7 +221,8 @@ def main():
                                                           perform_pca=perform_pca,
                                                           num_pca_components=input_dim,
                                                           core_location_graph=use_core_loc,
-                                                          num_signals=num_signals)
+                                                          num_signals=num_signals,
+                                                          signal_level_graph=signal_level_graph)
 
         # Initialize model
         model = NodeBinaryClassifier(input_dim=input_dim,
@@ -233,7 +236,9 @@ def main():
                                      num_signal_channels=num_signals,
                                      conv1d_kernel_size=conv1d_kernel_size,
                                      conv1d_stride=conv1d_stride,
-                                     num_heads=num_heads)
+                                     num_heads=num_heads,
+                                     signal_level_graph=signal_level_graph,
+                                     core_location_graph=use_core_loc)
     elif 'graph':
 
         # Load the train dataset

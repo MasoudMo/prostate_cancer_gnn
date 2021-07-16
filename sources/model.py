@@ -30,7 +30,9 @@ class NodeBinaryClassifier(nn.Module):
                  apply_output_activation=False,
                  conv1d_kernel_size=10,
                  conv1d_stride=8,
-                 num_signal_channels=1):
+                 num_signal_channels=1,
+                 signal_level_graph=False,
+                 core_location_graph=False):
         """
         Constructor for the NodeBinaryClassifier class
         Parameters:
@@ -47,15 +49,23 @@ class NodeBinaryClassifier(nn.Module):
             conv1d_kernel_size (int): Kernel size for 1D conv
             conv1d_stride (int): Stride used for 1D conv
             num_signal_channels (int): Number of signals per core
+            signal_level_graph (bool): Indicates whether each signal is one node or not
+            core_location_graph (bool): Indicates whether core location graph is used
         """
         super().__init__()
 
         # Model layers
-        self.conv1d = Conv1d(in_channels=num_signal_channels,
-                             out_channels=1,
-                             kernel_size=conv1d_kernel_size,
-                             stride=conv1d_stride)
-
+        if (signal_level_graph == True) or (core_location_graph == False):
+            self.conv1d = Conv1d(in_channels=1,
+                                out_channels=1,
+                                kernel_size=conv1d_kernel_size,
+                                stride=conv1d_stride)
+        else:
+            self.conv1d = Conv1d(in_channels=num_signal_channels,
+                                out_channels=1,
+                                kernel_size=conv1d_kernel_size,
+                                stride=conv1d_stride)
+                                
         self.conv1d_output_size = floor((input_dim - (conv1d_kernel_size-1) - 1)/conv1d_stride+1)
 
         if conv_type == 'sage':
