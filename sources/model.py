@@ -55,16 +55,16 @@ class NodeBinaryClassifier(nn.Module):
         super().__init__()
 
         # Model layers
-        if (signal_level_graph == True) or (core_location_graph == False):
-            self.conv1d = Conv1d(in_channels=1,
-                                out_channels=1,
-                                kernel_size=conv1d_kernel_size,
-                                stride=conv1d_stride)
-        else:
+        if core_location_graph and (not signal_level_graph):
             self.conv1d = Conv1d(in_channels=num_signal_channels,
-                                out_channels=1,
-                                kernel_size=conv1d_kernel_size,
-                                stride=conv1d_stride)
+                                 out_channels=1,
+                                 kernel_size=conv1d_kernel_size,
+                                 stride=conv1d_stride)
+        else:
+            self.conv1d = Conv1d(in_channels=1,
+                                 out_channels=1,
+                                 kernel_size=conv1d_kernel_size,
+                                 stride=conv1d_stride)
                                 
         self.conv1d_output_size = floor((input_dim - (conv1d_kernel_size-1) - 1)/conv1d_stride+1)
 

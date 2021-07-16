@@ -1,4 +1,4 @@
-from data import node_classification_graph, ProstateCancerDataset
+from data import node_classification_core_location_graph, node_classification_knn_graph, ProstateCancerDataset
 from model import NodeBinaryClassifier, GraphBinaryClassifier
 from data import collate
 from torch.utils.data import DataLoader
@@ -212,17 +212,18 @@ def main():
     # Load the dataset and prepare model based on training type
     if training_type == 'node':
         # training, validation and test nodes are all on the same graph
-        g, labels, mask, _cgs = node_classification_graph(mat_file_path=mat_file_path,
-                                                          weighted=weighted,
-                                                          k=k,
-                                                          knn_n_jobs=1,
-                                                          cuda_knn=use_cuda,
-                                                          threshold=threshold,
-                                                          perform_pca=perform_pca,
-                                                          num_pca_components=input_dim,
-                                                          core_location_graph=use_core_loc,
-                                                          num_signals=num_signals,
-                                                          signal_level_graph=signal_level_graph)
+        if use_core_loc:
+            g, labels, mask, _cgs = node_classification_core_location_graph(mat_file_path=mat_file_path,
+                                                                            perform_pca=perform_pca,
+                                                                            num_pca_components=input_dim,
+                                                                            num_signals=num_signals,
+                                                                            signal_level_graph=signal_level_graph)
+        else:
+            g, labels, mask, _cgs = node_classification_knn_graph(mat_file_path=mat_file_path,
+                                                                  perform_pca=perform_pca,
+                                                                  num_pca_components=input_dim,
+                                                                  num_signals=num_signals,
+                                                                  signal_level_graph=signal_level_graph)
 
         # Initialize model
         model = NodeBinaryClassifier(input_dim=input_dim,
