@@ -1,4 +1,5 @@
 from numpy import core
+from torch._C import dtype
 from data_utils import create_knn_adj_mat
 import numpy as np
 import networkx as nx
@@ -9,6 +10,7 @@ import dgl
 from sklearn.decomposition import PCA
 from datetime import datetime
 import logging
+from numpy.random import choice
 try:
     from knn_cuda import KNN
 except ImportError:
@@ -152,15 +154,18 @@ def node_classification_knn_graph(mat_file_path,
     cores_data = list()
     if signal_level_graph:
         for idx in range(train_cores_num):
+            indices = np.sort(choice(a=range(prostate_cancer_mat_data[train_mat_data[idx, 0]][()].shape[1]), size=num_signals, replace=False))
             cores_data.append(np.expand_dims(
-                np.swapaxes(prostate_cancer_mat_data[train_mat_data[idx, 0]][()][:, :num_signals], 0, 1), axis=0))
+                np.swapaxes(prostate_cancer_mat_data[train_mat_data[idx, 0]][()][:, indices], 0, 1), axis=0))
         for idx in range(val_cores_num):
+            indices = np.sort(choice(a=range(prostate_cancer_mat_data[val_mat_data[idx, 0]][()].shape[1]), size=num_signals, replace=False))
             cores_data.append(np.expand_dims(
-                np.swapaxes(prostate_cancer_mat_data[val_mat_data[idx, 0]][()][:, :num_signals], 0, 1), axis=0))
+                np.swapaxes(prostate_cancer_mat_data[val_mat_data[idx, 0]][()][:, indices], 0, 1), axis=0))
         for idx in range(test_cores_num):
+            indices = np.sort(choice(a=range(prostate_cancer_mat_data[test_mat_data[idx, 0]][()].shape[1]), size=num_signals, replace=False))
             cores_data.append(np.expand_dims(
-                np.swapaxes(prostate_cancer_mat_data[test_mat_data[idx, 0]][()][:, :num_signals], 0, 1), axis=0))
-        cores_data = np.vstack(cores_data)
+                np.swapaxes(prostate_cancer_mat_data[test_mat_data[idx, 0]][()][:, indices], 0, 1), axis=0))
+        cores_data = np.vstack(cores_data).astype(np.float32)
         cores_data = np.reshape(cores_data, (num_cores*num_signals, -1))
     else:
         for idx in range(train_cores_num):
@@ -331,15 +336,18 @@ def node_classification_core_location_graph(mat_file_path,
     # Get sample data
     cores_data = list()
     for idx in range(train_cores_num):
+        indices = np.sort(choice(a=range(prostate_cancer_mat_data[train_mat_data[idx, 0]][()].shape[1]), size=num_signals, replace=False))
         cores_data.append(np.expand_dims(
-            np.swapaxes(prostate_cancer_mat_data[train_mat_data[idx, 0]][()][:, :num_signals], 0, 1), axis=0))
+            np.swapaxes(prostate_cancer_mat_data[train_mat_data[idx, 0]][()][:, indices], 0, 1), axis=0))
     for idx in range(val_cores_num):
+        indices = np.sort(choice(a=range(prostate_cancer_mat_data[val_mat_data[idx, 0]][()].shape[1]), size=num_signals, replace=False))
         cores_data.append(np.expand_dims(
-            np.swapaxes(prostate_cancer_mat_data[val_mat_data[idx, 0]][()][:, :num_signals], 0, 1), axis=0))
+            np.swapaxes(prostate_cancer_mat_data[val_mat_data[idx, 0]][()][:, indices], 0, 1), axis=0))
     for idx in range(test_cores_num):
+        indices = np.sort(choice(a=range(prostate_cancer_mat_data[test_mat_data[idx, 0]][()].shape[1]), size=num_signals, replace=False))
         cores_data.append(np.expand_dims(
-            np.swapaxes(prostate_cancer_mat_data[test_mat_data[idx, 0]][()][:, :num_signals], 0, 1), axis=0))
-    cores_data = np.vstack(cores_data)
+            np.swapaxes(prostate_cancer_mat_data[test_mat_data[idx, 0]][()][:, indices], 0, 1), axis=0))
+    cores_data = np.vstack(cores_data).astype(np.float32)
     cores_data = np.reshape(cores_data, (num_cores*num_signals, -1))
 
     # Perform PCA on time domain data (To be used as node features)
@@ -372,6 +380,7 @@ def node_classification_core_location_graph(mat_file_path,
     # Create dgl graph
     g = dgl.from_networkx(graph)
     g = g.to(device)
+    labels = labels.to(device)
 
     # Adding node features
     g.ndata['h'] = torch.from_numpy(cores_data).type(torch.float32).to(device)

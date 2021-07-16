@@ -385,6 +385,7 @@ def main():
 
                         # Run the forward path
                         prediction = model(g)
+                        prediction = torch.flatten(prediction)
 
                         # Compute loss
                         loss = loss_func(prediction[mask[phase]], labels[mask[phase]])

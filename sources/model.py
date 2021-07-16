@@ -103,6 +103,7 @@ class NodeBinaryClassifier(nn.Module):
         self.apply_output_activation = apply_output_activation
         self.num_signal_channels = num_signal_channels
         self.conv_type = conv_type
+        self.signal_level_graph = signal_level_graph
 
     def forward(self, g):
         """
@@ -117,7 +118,7 @@ class NodeBinaryClassifier(nn.Module):
             h = h.cuda()
 
         # 1D conv
-        if self.num_signal_channels == 1:
+        if (self.num_signal_channels == 1) or self.signal_level_graph:
             h = torch.unsqueeze(h, dim=1)
         h = F.relu(self.conv1d(h))
         h = torch.squeeze(h)
