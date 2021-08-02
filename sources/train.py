@@ -277,7 +277,8 @@ def main():
                                             cuda_knn=use_cuda,
                                             threshold=threshold,
                                             perform_pca=perform_pca,
-                                            num_pca_components=input_dim)
+                                            num_pca_components=input_dim,
+                                            lap_enc_dim=lap_enc_dim)
 
         val_set_len = len(dataset_val)
         val_data_loader = DataLoader(dataset_val,
@@ -297,7 +298,8 @@ def main():
                                              cuda_knn=use_cuda,
                                              threshold=threshold,
                                              perform_pca=perform_pca,
-                                             num_pca_components=input_dim)
+                                             num_pca_components=input_dim,
+                                             lap_enc_dim=lap_enc_dim)
 
         test_set_len = len(dataset_test)
         test_data_loader = DataLoader(dataset_test,
@@ -328,7 +330,8 @@ def main():
                                       conv_dropout_p=conv_dropout_p,
                                       conv1d_kernel_size=conv1d_kernel_size,
                                       conv1d_stride=conv1d_stride,
-                                      num_heads=num_heads)
+                                      num_heads=num_heads,
+                                      lap_enc_dim=lap_enc_dim)
 
     # Initialize loss function and optimizer
     loss_func = nn.BCEWithLogitsLoss()

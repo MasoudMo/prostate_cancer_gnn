@@ -11,7 +11,7 @@ from sklearn.decomposition import PCA
 from datetime import datetime
 import logging
 from numpy.random import choice
-import scipy.sparse as sp
+from scipy import sparse as sp
 try:
     from knn_cuda import KNN
 except ImportError:
@@ -255,12 +255,6 @@ def node_classification_core_location_graph(mat_file_path,
     Creates the knn graph containing training, validation and test nodes
     Parameters:
         mat_file_path (str): Path to the time series .mat file
-        weighted (bool): Indicates whether the constructed graph is weighted or not
-        k (int): Number of neighbours to use for the K-nearest neighbour algorithm
-        knn_n_jobs (int): Number of jobs to deploy for graph creation in CPU mode
-        cuda_knn (bool): Indicate whether GPU knn is used or not
-        threshold (float): Value indicating the cutoff value for the Euclidean distance in graph creation (Only
-                           valid when weighted is set to True)
         perform_pca (bool): Indicates whether PCA dimension reduction is performed on data or not
         num_pca_components (int): Indicates the number of components for PCA
         get_cancer_grade (bool): Indicates whether cancer grade labels are obtained or not
