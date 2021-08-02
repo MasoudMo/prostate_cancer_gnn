@@ -127,6 +127,7 @@ class NodeBinaryClassifier(nn.Module):
         # 1D conv
         if (self.num_signal_channels == 1) or self.signal_level_graph:
             h = torch.unsqueeze(h, dim=1)
+            h = torch.unsqueeze(h, dim=0)
         h = F.relu(self.conv1d(h))
         h = torch.squeeze(h)
 
