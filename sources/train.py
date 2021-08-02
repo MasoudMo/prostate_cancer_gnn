@@ -58,7 +58,6 @@ def save_checkpoint(epoch, model, optimizer, loss, val_acc, path):
 
 
 def main():
-
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='GNN training on Prostate Cancer dataset (node classification)')
     parser.add_argument('--training_type',
@@ -351,7 +350,7 @@ def main():
         logger.info("Resuming from epoch: {} with loss: {}".format(starting_epoch, loss))
 
     # Move model to available device
-    model.to(device)
+    model = model.to(device)
 
     # Open history files if needed
     if history_path:
@@ -378,162 +377,167 @@ def main():
             else:
                 model.eval()
 
-                if use_cuda:
-                    torch.cuda.empty_cache()
+            if use_cuda:
+                torch.cuda.empty_cache()
 
-                # Zero parameter gradients
-                optimizer.zero_grad()
+            with torch.set_grad_enabled(phase == 'Training'):
 
-                with torch.set_grad_enabled(phase == 'Training'):
+                if training_type == 'node':
 
-                    if training_type == 'node':
+                    t_start = datetime.now()
 
-                        t_start = datetime.now()
+                    # Run the forward path
+                    prediction = model(g)
+                    prediction = torch.flatten(prediction)
 
-                        # Run the forward path
-                        prediction = model(g)
-                        prediction = torch.flatten(prediction)
+                    # Compute loss
+                    loss = loss_func(prediction[mask[phase]], labels[mask[phase]])
 
-                        # Compute loss
-                        loss = loss_func(prediction[mask[phase]], labels[mask[phase]])
+                    if phase == 'Training':
+                        # Back propagate
+                        loss.backward()
 
-                        if phase == 'Training':
-                            # Back propagate
-                            loss.backward()
-                            # Do one optimization step
-                            optimizer.step()
+                        # Do one optimization step
+                        optimizer.step()
 
-                        with torch.no_grad():
-                            # Compute accuracy
-                            acc = roc_auc_score(labels[mask[phase]].cpu().detach().numpy(),
-                                                prediction[mask[phase]].cpu().detach().numpy())
+                        # Zero parameter gradients
+                        optimizer.zero_grad()
 
-                            # print epoch stat
-                            logger.info('{} epoch {}, loss {:.4f}, accuracy {: .4f}'.format(phase,
-                                                                                            epoch,
-                                                                                            loss.item(),
-                                                                                            acc))
-
-                            # Save model checkpoint if validation accuracy has increased
-                            if phase == 'Validation':
-                                if acc > max_val_acc:
-                                    max_val_acc = acc
-                                    logger.warning("Acc increased ({:.4f}). Saving model to {}".format(max_val_acc,
-                                                                                                       best_model_path))
-                                    save_checkpoint(epoch, model, optimizer, loss.item(), acc, best_model_path)
-
-                            # Visualize the loss and accuracy
-                            if visualize:
-                                if visualization_tool == 'visdom':
-                                    vis.line(Y=torch.reshape(torch.tensor(loss.item()), (-1, )),
-                                             X=torch.reshape(torch.tensor(epoch), (-1, )),
-                                             update='append',
-                                             win=phase+'_loss',
-                                             opts=dict(title=phase+' Loss Per Epoch',
-                                                       xlabel='Epoch',
-                                                       ylabel='Loss'))
-
-                                    vis.line(Y=torch.reshape(torch.tensor(acc), (-1, )),
-                                             X=torch.reshape(torch.tensor(epoch), (-1, )),
-                                             update='append',
-                                             win=phase+'_acc',
-                                             opts=dict(title=phase+"Accuracy Per Epoch",
-                                                       xlabel="Epoch",
-                                                       ylabel="Accuracy"))
-
-                                if visualization_tool == 'wandb':
-                                    wandb.log({phase+' BCE Loss': loss.item(),
-                                               phase+' AUC ROC Accuracy': acc})
-
-                        t_end = datetime.now()
-                        logger.info("it took {} for the epoch to finish".format(t_end-t_start))
-
-                        # Save to history if needed
-                        if history_path:
-                            f[phase]['loss'].write(str(loss.item())+'\n')
-                            f[phase]['acc'].write(str(acc)+'\n')
-
-                    elif training_type == 'graph':
-
-                        t_start = datetime.now()
-
-                        y_true = np.empty((0, 3))
-                        y_score = np.empty((0, 3))
-
-                        epoch_loss = 0
-
-                        for bg, label, cg in dataloaders[phase]:
-
-                            label = label.to(device)
-                            bg = bg.to(device)
-
-                            # Keep track of true label
-                            y_true = np.append(y_true, label.cpu().detach().numpy())
-
-                            prediction = model(bg)
-                            prediction = torch.flatten(prediction)
-
-                            # Keep track of predicted scores
-                            y_score = np.append(y_score, prediction.cpu().detach().numpy())
-
-                            # Compute loss
-                            loss = loss_func(prediction, label)
-
-                            if phase == 'Training':
-                                # Back propagate
-                                loss.backward()
-                                # Do one optimization step
-                                optimizer.step()
-
-                            # Accumulate epoch loss
-                            epoch_loss += loss.detach().item()
-
-                        # Find and print average epoch loss
-                        epoch_loss /= floor(dataset_lens[phase]/batch_size)
-                        acc = roc_auc_score(y_true, y_score)
+                    with torch.no_grad():
+                        # Compute accuracy
+                        acc = roc_auc_score(labels[mask[phase]].cpu().detach().numpy(),
+                                            prediction[mask[phase]].cpu().detach().numpy())
 
                         # print epoch stat
-                        logger.info('{} epoch {}, loss {:.4f}, accuracy {: .4f}'.format(phase, epoch, epoch_loss, acc))
+                        logger.info('{} epoch {}, loss {:.4f}, accuracy {: .4f}'.format(phase,
+                                                                                        epoch,
+                                                                                        loss.item(),
+                                                                                        acc))
 
                         # Save model checkpoint if validation accuracy has increased
                         if phase == 'Validation':
                             if acc > max_val_acc:
                                 max_val_acc = acc
                                 logger.warning("Acc increased ({:.4f}). Saving model to {}".format(max_val_acc,
-                                                                                                   best_model_path))
+                                                                                                    best_model_path))
                                 save_checkpoint(epoch, model, optimizer, loss.item(), acc, best_model_path)
-
-                        # Print elapsed time
-                        t_end = datetime.now()
-                        logger.info("it took {} for the {} set.".format(t_end - t_start, phase))
 
                         # Visualize the loss and accuracy
                         if visualize:
                             if visualization_tool == 'visdom':
-                                vis.line(Y=torch.reshape(torch.tensor(epoch_loss), (-1, )),
-                                         X=torch.reshape(torch.tensor(epoch), (-1, )),
-                                         update='append',
-                                         win=phase+'_loss',
-                                         opts=dict(title=phase+' Loss Per Epoch',
-                                                   xlabel='Epoch',
-                                                   ylabel='Loss'))
+                                vis.line(Y=torch.reshape(torch.tensor(loss.item()), (-1, )),
+                                            X=torch.reshape(torch.tensor(epoch), (-1, )),
+                                            update='append',
+                                            win=phase+'_loss',
+                                            opts=dict(title=phase+' Loss Per Epoch',
+                                                    xlabel='Epoch',
+                                                    ylabel='Loss'))
 
                                 vis.line(Y=torch.reshape(torch.tensor(acc), (-1, )),
-                                         X=torch.reshape(torch.tensor(epoch), (-1, )),
-                                         update='append',
-                                         win=phase+'_acc',
-                                         opts=dict(title=phase+"Accuracy Per Epoch",
-                                                   xlabel="Epoch",
-                                                   ylabel="Accuracy"))
+                                            X=torch.reshape(torch.tensor(epoch), (-1, )),
+                                            update='append',
+                                            win=phase+'_acc',
+                                            opts=dict(title=phase+"Accuracy Per Epoch",
+                                                    xlabel="Epoch",
+                                                    ylabel="Accuracy"))
 
                             if visualization_tool == 'wandb':
-                                wandb.log({phase+' BCE Loss': epoch_loss,
-                                           phase+' AUC ROC Accuracy': acc})
+                                wandb.log({phase+' BCE Loss': loss.item(),
+                                            phase+' AUC ROC Accuracy': acc})
 
-                        # Save to history if needed
-                        if history_path:
-                            f[phase]['loss'].write(str(loss.item())+'\n')
-                            f[phase]['acc'].write(str(acc)+'\n')
+                    t_end = datetime.now()
+                    logger.info("it took {} for the epoch to finish".format(t_end-t_start))
+
+                    # Save to history if needed
+                    if history_path:
+                        f[phase]['loss'].write(str(loss.item())+'\n')
+                        f[phase]['acc'].write(str(acc)+'\n')
+
+                elif training_type == 'graph':
+
+                    t_start = datetime.now()
+
+                    y_true = np.empty((0, 3))
+                    y_score = np.empty((0, 3))
+
+                    epoch_loss = 0
+
+                    for bg, label, cg in dataloaders[phase]:
+
+                        label = label.to(device)
+                        bg = bg.to(device)
+
+                        # Keep track of true label
+                        y_true = np.append(y_true, label.cpu().detach().numpy())
+
+                        prediction = model(bg)
+                        prediction = torch.flatten(prediction)
+
+                        # Keep track of predicted scores
+                        y_score = np.append(y_score, prediction.cpu().detach().numpy())
+
+                        # Compute loss
+                        loss = loss_func(prediction, label)
+
+                        if phase == 'Training':
+                            # Back propagate
+                            loss.backward()
+                            
+                            # Do one optimization step
+                            optimizer.step()
+
+                            # Zero parameter gradients
+                            optimizer.zero_grad()
+
+                        # Accumulate epoch loss
+                        epoch_loss += loss.detach().item()
+
+                    # Find and print average epoch loss
+                    epoch_loss /= floor(dataset_lens[phase]/batch_size)
+                    acc = roc_auc_score(y_true, y_score)
+
+                    # Print epoch stat
+                    logger.info('{} epoch {}, loss {:.4f}, accuracy {: .4f}'.format(phase, epoch, epoch_loss, acc))
+
+                    # Save model checkpoint if validation accuracy has increased
+                    if phase == 'Validation':
+                        if acc > max_val_acc:
+                            max_val_acc = acc
+                            logger.warning("Acc increased ({:.4f}). Saving model to {}".format(max_val_acc,
+                                                                                                best_model_path))
+                            save_checkpoint(epoch, model, optimizer, loss.item(), acc, best_model_path)
+
+                    # Print elapsed time
+                    t_end = datetime.now()
+                    logger.info("it took {} for the {} set.".format(t_end - t_start, phase))
+
+                    # Visualize the loss and accuracy
+                    if visualize:
+                        if visualization_tool == 'visdom':
+                            vis.line(Y=torch.reshape(torch.tensor(epoch_loss), (-1, )),
+                                        X=torch.reshape(torch.tensor(epoch), (-1, )),
+                                        update='append',
+                                        win=phase+'_loss',
+                                        opts=dict(title=phase+' Loss Per Epoch',
+                                                xlabel='Epoch',
+                                                ylabel='Loss'))
+
+                            vis.line(Y=torch.reshape(torch.tensor(acc), (-1, )),
+                                        X=torch.reshape(torch.tensor(epoch), (-1, )),
+                                        update='append',
+                                        win=phase+'_acc',
+                                        opts=dict(title=phase+"Accuracy Per Epoch",
+                                                xlabel="Epoch",
+                                                ylabel="Accuracy"))
+
+                        if visualization_tool == 'wandb':
+                            wandb.log({phase+' BCE Loss': epoch_loss,
+                                        phase+' AUC ROC Accuracy': acc})
+
+                    # Save to history if needed
+                    if history_path:
+                        f[phase]['loss'].write(str(loss.item())+'\n')
+                        f[phase]['acc'].write(str(acc)+'\n')
 
     # Close files
     f['Training']['loss'].close()
