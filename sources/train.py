@@ -138,6 +138,7 @@ def main():
     feat_drop = float(train_params['GNNFeatDrop'])
     attn_drop = float(train_params['GNNAttnDrop'])
     weighted = train_params.getboolean('WeightedGraph')
+    lap_enc_dim = int(train_params['LapPositionalDim'])
     if train_params['Threshold'] == 'None':
         threshold = None
     else:
@@ -178,7 +179,8 @@ def main():
                                 'feat_drop': feat_drop,
                                 'attn_drop': attn_drop,
                                 'weighted': weighted,
-                                'signal_level_graph': signal_level_graph})
+                                'signal_level_graph': signal_level_graph,
+                                'lap_enc_dim': lap_enc_dim})
             elif training_type == 'graph':
                 wandb.init(entity=wandb_user,
                         project='prostate_cancer_graph_classification',
@@ -198,7 +200,8 @@ def main():
                                 'weight_decay': weight_decay,
                                 'feat_drop': feat_drop,
                                 'attn_drop': attn_drop,
-                                'weighted': weighted})
+                                'weighted': weighted,
+                                'lap_enc_dim': lap_enc_dim})
 
     # Check whether cuda is available or not
     use_cuda = torch.cuda.is_available()
@@ -217,13 +220,15 @@ def main():
                                                                             perform_pca=perform_pca,
                                                                             num_pca_components=input_dim,
                                                                             num_signals=num_signals,
-                                                                            signal_level_graph=signal_level_graph)
+                                                                            signal_level_graph=signal_level_graph,
+                                                                            lap_enc_dim=lap_enc_dim)
         else:
             g, labels, mask, _cgs = node_classification_knn_graph(mat_file_path=mat_file_path,
                                                                   perform_pca=perform_pca,
                                                                   num_pca_components=input_dim,
                                                                   num_signals=num_signals,
-                                                                  signal_level_graph=signal_level_graph)
+                                                                  signal_level_graph=signal_level_graph,
+                                                                  lap_enc_dim=lap_enc_dim)
 
         # Initialize model
         model = NodeBinaryClassifier(input_dim=input_dim,
@@ -239,7 +244,8 @@ def main():
                                      conv1d_stride=conv1d_stride,
                                      num_heads=num_heads,
                                      signal_level_graph=signal_level_graph,
-                                     core_location_graph=use_core_loc)
+                                     core_location_graph=use_core_loc,
+                                     lap_enc_dim=lap_enc_dim)
     elif 'graph':
 
         # Load the train dataset
@@ -251,7 +257,8 @@ def main():
                                               cuda_knn=use_cuda,
                                               threshold=threshold,
                                               perform_pca=perform_pca,
-                                              num_pca_components=input_dim)
+                                              num_pca_components=input_dim,
+                                              lap_enc_dim=lap_enc_dim)
 
         train_set_len = len(dataset_train)
         train_data_loader = DataLoader(dataset_train,

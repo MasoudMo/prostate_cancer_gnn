@@ -11,6 +11,7 @@ from sklearn.decomposition import PCA
 from datetime import datetime
 import logging
 from numpy.random import choice
+import scipy.sparse as sp
 try:
     from knn_cuda import KNN
 except ImportError:
@@ -18,6 +19,25 @@ except ImportError:
 
 
 logger = logging.getLogger('gnn_prostate_cancer')
+
+
+def laplacian_positional_encoding(g, pos_enc_dim):
+    """
+        Graph positional encoding v/ Laplacian eigenvectors (code from:
+        https://github.com/graphdeeplearning/benchmarking-gnns)
+    """
+
+    # Laplacian
+    A = g.adjacency_matrix_scipy(return_edge_ids=False).astype(float)
+    N = sp.diags(dgl.backend.asnumpy(g.in_degrees()).clip(1) ** -0.5, dtype=float)
+    L = sp.eye(g.number_of_nodes()) - N * A * N
+
+    # Eigenvectors with scipy
+    EigVal, EigVec = sp.linalg.eigs(L, k=pos_enc_dim+1, which='SR', tol=1e-2)
+    EigVec = EigVec[:, EigVal.argsort()] # increasing order
+    g.ndata['lap_pos_enc'] = torch.from_numpy(EigVec[:, 1:pos_enc_dim+1]).float()
+
+    return g
 
 
 def node_classification_knn_graph(mat_file_path,
@@ -39,7 +59,8 @@ def node_classification_knn_graph(mat_file_path,
                                   val_cancer_grade_string='GS_val',
                                   test_cancer_grade_string='GS_test',
                                   num_signals=1500,
-                                  signal_level_graph=False):
+                                  signal_level_graph=False,
+                                  lap_enc_dim=40):
     """
     Creates the knn graph containing training, validation and test nodes
     Parameters:
@@ -69,6 +90,7 @@ def node_classification_knn_graph(mat_file_path,
         test_corename_string (str): Test corename string in the mat file
         signal_level_graph (bool): Indicates whether the KNN graph is built for
                                    cores (mean of signals) or signals
+        lap_enc_dim (int): Indicates the dim for laplacian embedding (0 to disable)
     """
     # Load the .mat file
     prostate_cancer_mat_data = h5py.File(mat_file_path, 'r')
@@ -203,6 +225,10 @@ def node_classification_knn_graph(mat_file_path,
     # Put time domain signals as node features
     g.ndata['h'] = torch.from_numpy(cores_data).to(device)
 
+    # Get positional encodings
+    if lap_enc_dim > 0:
+        laplacian_positional_encoding(g, lap_enc_dim)
+
     return g, labels, mask, cgs
 
 
@@ -223,7 +249,8 @@ def node_classification_core_location_graph(mat_file_path,
                                             train_corename_string='corename_train',
                                             val_corename_string='corename_val',
                                             test_corename_string='corename_test',
-                                            signal_level_graph=False):
+                                            signal_level_graph=False,
+                                            lap_enc_dim=40):
     """
     Creates the knn graph containing training, validation and test nodes
     Parameters:
@@ -252,6 +279,7 @@ def node_classification_core_location_graph(mat_file_path,
         test_corename_string (str): Test corename string in the mat file
         signal_level_graph (bool): Indicates whether the KNN graph is built for 
                                    cores (mean of signals) or signals
+        lap_enc_dim (int): Indicates the dim for laplacian embedding (0 to disable)
     """
     # Load the .mat file
     prostate_cancer_mat_data = h5py.File(mat_file_path, 'r')
@@ -385,6 +413,10 @@ def node_classification_core_location_graph(mat_file_path,
     # Adding node features
     g.ndata['h'] = torch.from_numpy(cores_data).type(torch.float32).to(device)
 
+    # Get positional encodings
+    if lap_enc_dim > 0:
+        laplacian_positional_encoding(g, lap_enc_dim)
+
     return g, labels, mask, cgs
 
 
@@ -418,7 +450,8 @@ class ProstateCancerDataset(Dataset):
                  val_data_string='data_val',
                  train_label_string='label_train',
                  test_label_string='label_test',
-                 val_label_string='label_val'):
+                 val_label_string='label_val',
+                 lap_enc_dim=40):
         """
         Constructor for the prostate cancer dataset class
         Parameters:
@@ -439,6 +472,7 @@ class ProstateCancerDataset(Dataset):
             train_label_string (str): If train data string is anything other than data_train, specify it
             test_label_string (str): If test data string is anything other than data_test, specify it
             val_label_string (str): If validation data string is anything other than data_val, specify it
+            lap_enc_dim (int): Indicates the dim for laplacian embedding (0 to disable)
         """
 
         # Load the .mat file
@@ -477,6 +511,7 @@ class ProstateCancerDataset(Dataset):
         self.perform_pca = perform_pca
         self.num_pca_components = num_pca_components
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.lap_enc_dim = lap_enc_dim
 
     def __getitem__(self, idx):
         """
@@ -486,6 +521,7 @@ class ProstateCancerDataset(Dataset):
         Returns:
             (numpy array): Numpy array containing the signals for a single core
             (int): Label indicating whether the core is cancerous or healthy
+            (str): Cancer grade string label
         """
 
         # Obtain the label for the specified core
@@ -535,6 +571,10 @@ class ProstateCancerDataset(Dataset):
             g.ndata['h'] = torch.from_numpy(reduced_data).to(self.device)
         else:
             g.ndata['h'] = torch.from_numpy(data).to(self.device)
+
+        # Get positional encodings
+        if self.lap_enc_dim > 0:
+            laplacian_positional_encoding(g, self.lap_enc_dim)
 
         return g, label, cg
 

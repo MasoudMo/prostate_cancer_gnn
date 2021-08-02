@@ -32,7 +32,8 @@ class NodeBinaryClassifier(nn.Module):
                  conv1d_stride=8,
                  num_signal_channels=1,
                  signal_level_graph=False,
-                 core_location_graph=False):
+                 core_location_graph=False,
+                 lap_enc_dim=40):
         """
         Constructor for the NodeBinaryClassifier class
         Parameters:
@@ -51,6 +52,7 @@ class NodeBinaryClassifier(nn.Module):
             num_signal_channels (int): Number of signals per core
             signal_level_graph (bool): Indicates whether each signal is one node or not
             core_location_graph (bool): Indicates whether core location graph is used
+            lap_enc_dim (int): Indicates the dim for laplacian embedding (0 to disable)
         """
         super().__init__()
 
@@ -58,15 +60,19 @@ class NodeBinaryClassifier(nn.Module):
         if core_location_graph and (not signal_level_graph):
             self.conv1d = Conv1d(in_channels=num_signal_channels,
                                  out_channels=1,
-                                 kernel_size=conv1d_kernel_size,
-                                 stride=conv1d_stride)
+                                 kernel_size=(conv1d_kernel_size, conv1d_kernel_size),
+                                 stride=(conv1d_stride, conv1d_stride))
         else:
             self.conv1d = Conv1d(in_channels=1,
                                  out_channels=1,
-                                 kernel_size=conv1d_kernel_size,
-                                 stride=conv1d_stride)
+                                 kernel_size=(conv1d_kernel_size, conv1d_kernel_size),
+                                 stride=(conv1d_stride, conv1d_stride))
                                 
         self.conv1d_output_size = floor((input_dim - (conv1d_kernel_size-1) - 1)/conv1d_stride+1)
+
+        # Positional embedding linear layer
+        if lap_enc_dim > 0:
+            self.pos_embed_lin = nn.Linear(in_features=lap_enc_dim, out_features=self.conv1d_output_size)
 
         if conv_type == 'sage':
             self.conv1 = SAGEConv(self.conv1d_output_size,
@@ -104,6 +110,7 @@ class NodeBinaryClassifier(nn.Module):
         self.num_signal_channels = num_signal_channels
         self.conv_type = conv_type
         self.signal_level_graph = signal_level_graph
+        self.lap_enc_dim = lap_enc_dim
 
     def forward(self, g):
         """
@@ -123,13 +130,17 @@ class NodeBinaryClassifier(nn.Module):
         h = F.relu(self.conv1d(h))
         h = torch.squeeze(h)
 
+        # Add positional embedding
+        if self.lap_enc_dim > 0:
+            h = h + self.pos_embed_lin(g.ndata['lap_pos_enc'])
+
         # Two layers of Graph Convolution
         h = F.relu(self.conv_dropout(self.conv1(g, h)))
 
         if self.conv_type == 'gat':
             h = torch.flatten(h, start_dim=1)
 
-        h = F.relu(self.conv2(g, h))
+        h = F.relu(self.conv_dropout(self.conv2(g, h)))
 
         if self.conv_type == 'gat':
             h = torch.mean(h, dim=1)
@@ -162,7 +173,8 @@ class GraphBinaryClassifier(nn.Module):
                  conv1d_kernel_size=10,
                  conv1d_stride=8,
                  num_heads=1,
-                 apply_output_activation=False):
+                 apply_output_activation=False,
+                 lap_enc_dim=40):
         """
         Constructor for the GraphBinaryClassifier class
         Parameters:
@@ -178,16 +190,21 @@ class GraphBinaryClassifier(nn.Module):
             conv1d_stride (int): Stride used for 1D conv
             num_heads (int): Number of attention heads for the GAT network
             apply_output_activation (bool): Indicates whether sigmoid is applied at the output or not
+            lap_enc_dim (int): Indicates the dim for laplacian embedding (0 to disable)
         """
         super().__init__()
 
         # Model layers
         self.conv1d = Conv1d(in_channels=1,
                              out_channels=1,
-                             kernel_size=conv1d_kernel_size,
-                             stride=conv1d_stride)
+                             kernel_size=(conv1d_kernel_size, conv1d_kernel_size),
+                             stride=(conv1d_stride, conv1d_stride))
 
         self.conv1d_output_size = floor((input_dim - (conv1d_kernel_size-1) - 1)/conv1d_stride+1)
+
+        # Positional embedding linear layer
+        if lap_enc_dim > 0:
+            self.pos_embed_lin = nn.Linear(in_features=lap_enc_dim, out_features=self.conv1d_output_size)
 
         if conv_type == 'sage':
             self.conv1 = SAGEConv(self.conv1d_output_size,
@@ -230,6 +247,7 @@ class GraphBinaryClassifier(nn.Module):
         self.use_cuda = use_cuda
         self.apply_output_activation = apply_output_activation
         self.conv_type = conv_type
+        self.lap_enc_dim = lap_enc_dim
 
     def forward(self, g, itr=None, label=None, cg=None, embedding_path=None):
         """
@@ -248,13 +266,17 @@ class GraphBinaryClassifier(nn.Module):
         h = F.relu(self.conv1d(h))
         h = torch.squeeze(h)
 
+        # Add positional embedding
+        if self.lap_enc_dim > 0:
+            h = h + self.pos_embed_lin(g.ndata['lap_pos_enc'])
+
         # Two layers of Graph Convolution
         h = F.relu(self.conv_dropout(self.conv1(g, h)))
 
         if self.conv_type == 'gat':
             h = torch.flatten(h, start_dim=1)
 
-        h = F.relu(self.conv2(g, h))
+        F.relu(self.conv_dropout(self.conv2(g, h)))
 
         if self.conv_type == 'gat':
             h = torch.mean(h, dim=1)
