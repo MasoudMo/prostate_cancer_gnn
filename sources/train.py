@@ -336,6 +336,7 @@ def main():
     # Initialize loss function and optimizer
     loss_func = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=10)
 
     # Initialize starting epoch index
     starting_epoch = 0
@@ -425,6 +426,9 @@ def main():
                                                                                                     best_model_path))
                                 save_checkpoint(epoch, model, optimizer, loss.item(), acc, best_model_path)
 
+                            # Adjust LR
+                            scheduler.step(loss.item())
+
                         # Visualize the loss and accuracy
                         if visualize:
                             if visualization_tool == 'visdom':
@@ -509,6 +513,9 @@ def main():
                             logger.warning("Acc increased ({:.4f}). Saving model to {}".format(max_val_acc,
                                                                                                 best_model_path))
                             save_checkpoint(epoch, model, optimizer, loss.item(), acc, best_model_path)
+
+                        # Adjust LR
+                        scheduler.step(loss.item())
 
                     # Print elapsed time
                     t_end = datetime.now()

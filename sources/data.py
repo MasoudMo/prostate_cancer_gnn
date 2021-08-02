@@ -21,7 +21,7 @@ except ImportError:
 logger = logging.getLogger('gnn_prostate_cancer')
 
 
-def laplacian_positional_encoding(g, pos_enc_dim):
+def laplacian_positional_encoding(g, pos_enc_dim, device):
     """
         Graph positional encoding v/ Laplacian eigenvectors (code from:
         https://github.com/graphdeeplearning/benchmarking-gnns)
@@ -35,7 +35,7 @@ def laplacian_positional_encoding(g, pos_enc_dim):
     # Eigenvectors with scipy
     EigVal, EigVec = sp.linalg.eigs(L, k=pos_enc_dim+1, which='SR', tol=1e-2)
     EigVec = EigVec[:, EigVal.argsort()] # increasing order
-    g.ndata['lap_pos_enc'] = torch.from_numpy(EigVec[:, 1:pos_enc_dim+1]).float()
+    g.ndata['lap_pos_enc'] = torch.from_numpy(EigVec[:, 1:pos_enc_dim+1]).float().to(device)
 
     return g
 
@@ -227,7 +227,7 @@ def node_classification_knn_graph(mat_file_path,
 
     # Get positional encodings
     if lap_enc_dim > 0:
-        laplacian_positional_encoding(g, lap_enc_dim)
+        laplacian_positional_encoding(g, lap_enc_dim, device)
 
     return g, labels, mask, cgs
 
@@ -409,7 +409,7 @@ def node_classification_core_location_graph(mat_file_path,
 
     # Get positional encodings
     if lap_enc_dim > 0:
-        laplacian_positional_encoding(g, lap_enc_dim)
+        laplacian_positional_encoding(g, lap_enc_dim, device)
 
     return g, labels, mask, cgs
 
@@ -568,7 +568,7 @@ class ProstateCancerDataset(Dataset):
 
         # Get positional encodings
         if self.lap_enc_dim > 0:
-            laplacian_positional_encoding(g, self.lap_enc_dim)
+            laplacian_positional_encoding(g, self.lap_enc_dim, self.device)
 
         return g, label, cg
 
