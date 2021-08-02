@@ -65,7 +65,7 @@ class NodeBinaryClassifier(nn.Module):
         else:
             self.conv1d = Conv1d(in_channels=1,
                                  out_channels=1,
-                                 kernel_size=(conv1d_kernel_size, conv1d_kernel_size),
+                                 kernel_size=conv1d_kernel_size,
                                  stride=conv1d_stride)
                                 
         self.conv1d_output_size = floor((input_dim - (conv1d_kernel_size-1) - 1)/conv1d_stride+1)
