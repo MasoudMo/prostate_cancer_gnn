@@ -60,13 +60,13 @@ class NodeBinaryClassifier(nn.Module):
         if core_location_graph and (not signal_level_graph):
             self.conv1d = Conv1d(in_channels=num_signal_channels,
                                  out_channels=1,
-                                 kernel_size=(conv1d_kernel_size, conv1d_kernel_size),
-                                 stride=(conv1d_stride, conv1d_stride))
+                                 kernel_size=conv1d_kernel_size,
+                                 stride=conv1d_stride)
         else:
             self.conv1d = Conv1d(in_channels=1,
                                  out_channels=1,
                                  kernel_size=(conv1d_kernel_size, conv1d_kernel_size),
-                                 stride=(conv1d_stride, conv1d_stride))
+                                 stride=conv1d_stride)
                                 
         self.conv1d_output_size = floor((input_dim - (conv1d_kernel_size-1) - 1)/conv1d_stride+1)
 
@@ -127,7 +127,7 @@ class NodeBinaryClassifier(nn.Module):
         # 1D conv
         if (self.num_signal_channels == 1) or self.signal_level_graph:
             h = torch.unsqueeze(h, dim=1)
-            h = torch.unsqueeze(h, dim=0)
+
         h = F.relu(self.conv1d(h))
         h = torch.squeeze(h)
 
@@ -198,8 +198,8 @@ class GraphBinaryClassifier(nn.Module):
         # Model layers
         self.conv1d = Conv1d(in_channels=1,
                              out_channels=1,
-                             kernel_size=(conv1d_kernel_size, conv1d_kernel_size),
-                             stride=(conv1d_stride, conv1d_stride))
+                             kernel_size=conv1d_kernel_size,
+                             stride=conv1d_stride)
 
         self.conv1d_output_size = floor((input_dim - (conv1d_kernel_size-1) - 1)/conv1d_stride+1)
 
