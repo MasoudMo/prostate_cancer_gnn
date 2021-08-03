@@ -362,15 +362,18 @@ def node_classification_core_location_graph(mat_file_path,
     # Get sample data
     cores_data = list()
     for idx in range(train_cores_num):
-        indices = np.sort(choice(a=range(prostate_cancer_mat_data[train_mat_data[idx, 0]][()].shape[1]), size=num_signals, replace=False))
+        indices = np.sort(choice(a=range(prostate_cancer_mat_data[train_mat_data[idx, 0]][()].shape[1]),
+                                 size=num_signals, replace=False))
         cores_data.append(np.expand_dims(
             np.swapaxes(prostate_cancer_mat_data[train_mat_data[idx, 0]][()][:, indices], 0, 1), axis=0))
     for idx in range(val_cores_num):
-        indices = np.sort(choice(a=range(prostate_cancer_mat_data[val_mat_data[idx, 0]][()].shape[1]), size=num_signals, replace=False))
+        indices = np.sort(choice(a=range(prostate_cancer_mat_data[val_mat_data[idx, 0]][()].shape[1]),
+                                 size=num_signals, replace=False))
         cores_data.append(np.expand_dims(
             np.swapaxes(prostate_cancer_mat_data[val_mat_data[idx, 0]][()][:, indices], 0, 1), axis=0))
     for idx in range(test_cores_num):
-        indices = np.sort(choice(a=range(prostate_cancer_mat_data[test_mat_data[idx, 0]][()].shape[1]), size=num_signals, replace=False))
+        indices = np.sort(choice(a=range(prostate_cancer_mat_data[test_mat_data[idx, 0]][()].shape[1]),
+                                 size=num_signals, replace=False))
         cores_data.append(np.expand_dims(
             np.swapaxes(prostate_cancer_mat_data[test_mat_data[idx, 0]][()][:, indices], 0, 1), axis=0))
     cores_data = np.vstack(cores_data).astype(np.float32)
