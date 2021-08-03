@@ -21,7 +21,7 @@ class NodeBinaryClassifier(nn.Module):
                  hidden_dim,
                  aggregator_type='mean',
                  feat_drop=0,
-                 device='cpu',
+                 device=torch.device('cpu'),
                  fc_dropout_p=0,
                  conv_dropout_p=0,
                  attn_drop=0,
@@ -41,7 +41,7 @@ class NodeBinaryClassifier(nn.Module):
             hidden_dim (int): dimension of hidden embeddings
             aggregator_type (str): One of mean, lstm, gcn or pool
             feat_drop (float): Indicates the dropout rate for the features
-            device (str): Indicates whether GPU should be utilized or not
+            device (torch device): Indicates whether GPU should be utilized or not
             fc_dropout_p (float): Indicates the FC layer dropout ratio
             attn_drop (float): Indicates the dropout rate for the attention mechanism
             conv_type (str): Type of GNN to use
@@ -171,7 +171,7 @@ class GraphBinaryClassifier(nn.Module):
                  hidden_dim,
                  aggregator_type='mean',
                  feat_drop=0,
-                 device='cpu',
+                 device=torch.device('cpu'),
                  fc_dropout_p=0,
                  conv_dropout_p=0,
                  attn_drop=0,
@@ -188,7 +188,7 @@ class GraphBinaryClassifier(nn.Module):
             hidden_dim (int): dimension of hidden embeddings
             aggregator_type (str): One of mean, lstm, gcn or pool
             feat_drop (float): Indicates the dropout rate for the features
-            device (str): Indicates whether GPU should be utilized or not
+            device (torch device): Indicates whether GPU should be utilized or not
             fc_dropout_p (float): Indicates the FC layer dropout ratio
             attn_drop (float): Indicates the dropout rate for the attention mechanism
             conv_type (str): Type of GNN to use
