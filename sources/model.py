@@ -21,7 +21,7 @@ class NodeBinaryClassifier(nn.Module):
                  hidden_dim,
                  aggregator_type='mean',
                  feat_drop=0,
-                 use_cuda=False,
+                 device='cpu',
                  fc_dropout_p=0,
                  conv_dropout_p=0,
                  attn_drop=0,
@@ -41,7 +41,7 @@ class NodeBinaryClassifier(nn.Module):
             hidden_dim (int): dimension of hidden embeddings
             aggregator_type (str): One of mean, lstm, gcn or pool
             feat_drop (float): Indicates the dropout rate for the features
-            use_cuda (bool): Indicates whether GPU should be utilized or not
+            device (str): Indicates whether GPU should be utilized or not
             fc_dropout_p (float): Indicates the FC layer dropout ratio
             attn_drop (float): Indicates the dropout rate for the attention mechanism
             conv_type (str): Type of GNN to use
@@ -105,7 +105,7 @@ class NodeBinaryClassifier(nn.Module):
         self.fc_3 = nn.Linear(int(hidden_dim/8), 1)
         self.out_act = nn.Sigmoid()
 
-        self.use_cuda = use_cuda
+        self.device = device
         self.apply_output_activation = apply_output_activation
         self.num_signal_channels = num_signal_channels
         self.conv_type = conv_type
@@ -121,8 +121,7 @@ class NodeBinaryClassifier(nn.Module):
         # Use RF signals as node features
         h = g.ndata['h']
 
-        if self.use_cuda:
-            h = h.cuda()
+        h.to(self.device)
 
         # 1D conv
         if (self.num_signal_channels == 1) or self.signal_level_graph:
@@ -135,7 +134,7 @@ class NodeBinaryClassifier(nn.Module):
         if self.lap_enc_dim > 0:
             # Flip signs as outlined in https://arxiv.org/abs/2003.00982
             h_pos_enc = self.pos_embed_lin(g.ndata['lap_pos_enc'])
-            sign_flip = torch.rand(h_pos_enc.size(1))
+            sign_flip = torch.rand(h_pos_enc.size(1)).to(self.device)
             sign_flip[sign_flip >= 0.5] = 1.0
             sign_flip[sign_flip < 0.5] = -1.0
             h_pos_enc = h_pos_enc * sign_flip.unsqueeze(0)
@@ -172,7 +171,7 @@ class GraphBinaryClassifier(nn.Module):
                  hidden_dim,
                  aggregator_type='mean',
                  feat_drop=0,
-                 use_cuda=False,
+                 device='cpu',
                  fc_dropout_p=0,
                  conv_dropout_p=0,
                  attn_drop=0,
@@ -189,7 +188,7 @@ class GraphBinaryClassifier(nn.Module):
             hidden_dim (int): dimension of hidden embeddings
             aggregator_type (str): One of mean, lstm, gcn or pool
             feat_drop (float): Indicates the dropout rate for the features
-            use_cuda (bool): Indicates whether GPU should be utilized or not
+            device (str): Indicates whether GPU should be utilized or not
             fc_dropout_p (float): Indicates the FC layer dropout ratio
             attn_drop (float): Indicates the dropout rate for the attention mechanism
             conv_type (str): Type of GNN to use
@@ -251,7 +250,7 @@ class GraphBinaryClassifier(nn.Module):
         # Pooling layer
         self.global_pool = AvgPooling()
 
-        self.use_cuda = use_cuda
+        self.device = device
         self.apply_output_activation = apply_output_activation
         self.conv_type = conv_type
         self.lap_enc_dim = lap_enc_dim
@@ -265,8 +264,7 @@ class GraphBinaryClassifier(nn.Module):
         # Use RF signals as node features
         h = g.ndata['h']
 
-        if self.use_cuda:
-            h = h.cuda()
+        h.to(self.device)
 
         # 1D conv
         h = torch.unsqueeze(h, dim=1)
@@ -277,7 +275,7 @@ class GraphBinaryClassifier(nn.Module):
         if self.lap_enc_dim > 0:
             # Flip signs as outlined in https://arxiv.org/abs/2003.00982
             h_pos_enc = self.pos_embed_lin(g.ndata['lap_pos_enc'])
-            sign_flip = torch.rand(h_pos_enc.size(1))
+            sign_flip = torch.rand(h_pos_enc.size(1)).to(self.device)
             sign_flip[sign_flip >= 0.5] = 1.0
             sign_flip[sign_flip < 0.5] = -1.0
             h_pos_enc = h_pos_enc * sign_flip.unsqueeze(0)
