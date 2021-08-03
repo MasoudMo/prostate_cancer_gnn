@@ -469,7 +469,7 @@ def main():
 
                     epoch_loss = 0
 
-                    for bg, label, cg in dataloaders[phase]:
+                    for bg, label, _cg in dataloaders[phase]:
 
                         label = label.to(device)
                         bg = bg.to(device)

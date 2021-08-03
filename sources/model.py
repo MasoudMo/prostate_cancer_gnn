@@ -133,7 +133,13 @@ class NodeBinaryClassifier(nn.Module):
 
         # Add positional embedding
         if self.lap_enc_dim > 0:
-            h = h + self.pos_embed_lin(g.ndata['lap_pos_enc'])
+            # Flip signs as outlined in https://arxiv.org/abs/2003.00982
+            h_pos_enc = self.pos_embed_lin(g.ndata['lap_pos_enc'])
+            sign_flip = torch.rand(h_pos_enc.size(1))
+            sign_flip[sign_flip >= 0.5] = 1.0
+            sign_flip[sign_flip < 0.5] = -1.0
+            h_pos_enc = h_pos_enc * sign_flip.unsqueeze(0)
+            h = h + h_pos_enc
 
         # Two layers of Graph Convolution
         h = F.relu(self.conv_dropout(self.conv1(g, h)))
@@ -269,7 +275,13 @@ class GraphBinaryClassifier(nn.Module):
 
         # Add positional embedding
         if self.lap_enc_dim > 0:
-            h = h + self.pos_embed_lin(g.ndata['lap_pos_enc'])
+            # Flip signs as outlined in https://arxiv.org/abs/2003.00982
+            h_pos_enc = self.pos_embed_lin(g.ndata['lap_pos_enc'])
+            sign_flip = torch.rand(h_pos_enc.size(1))
+            sign_flip[sign_flip >= 0.5] = 1.0
+            sign_flip[sign_flip < 0.5] = -1.0
+            h_pos_enc = h_pos_enc * sign_flip.unsqueeze(0)
+            h = h + h_pos_enc
 
         # Two layers of Graph Convolution
         h = F.relu(self.conv_dropout(self.conv1(g, h)))
@@ -277,7 +289,7 @@ class GraphBinaryClassifier(nn.Module):
         if self.conv_type == 'gat':
             h = torch.flatten(h, start_dim=1)
 
-        F.relu(self.conv_dropout(self.conv2(g, h)))
+        h = F.relu(self.conv_dropout(self.conv2(g, h)))
 
         if self.conv_type == 'gat':
             h = torch.mean(h, dim=1)

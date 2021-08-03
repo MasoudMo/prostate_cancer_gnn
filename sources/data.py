@@ -28,7 +28,7 @@ def laplacian_positional_encoding(g, pos_enc_dim, device):
     """
 
     # Laplacian
-    A = g.adjacency_matrix_scipy(return_edge_ids=False).astype(float)
+    A = g.adjacency_matrix(scipy_fmt="csr").astype(float)
     N = sp.diags(dgl.backend.asnumpy(g.in_degrees()).clip(1) ** -0.5, dtype=float)
     L = sp.eye(g.number_of_nodes()) - N * A * N
 
@@ -107,7 +107,7 @@ def node_classification_knn_graph(mat_file_path,
     labels = np.concatenate((train_labels, val_labels, test_labels)).reshape((-1, 1))
     if signal_level_graph:
         labels = np.repeat(labels, num_signals)
-    labels = torch.tensor(labels, dtype=torch.float32)
+    labels = torch.flatten(torch.tensor(labels, dtype=torch.float32))
 
     # Get total number of cores (nodes)
     train_cores_num = train_mat_data.shape[0]
@@ -207,6 +207,10 @@ def node_classification_knn_graph(mat_file_path,
         t_end = datetime.now()
         logger.debug("PCA Reduction for RF data took {}".format(t_end - t_start))
 
+    # Reshape the data samples if needed
+    if not signal_level_graph:
+        cores_data = np.expand_dims(cores_data, axis=1)
+
     graph = create_knn_adj_mat(cores_data,
                                k=k,
                                weighted=weighted,
@@ -252,7 +256,7 @@ def node_classification_core_location_graph(mat_file_path,
                                             signal_level_graph=False,
                                             lap_enc_dim=40):
     """
-    Creates the knn graph containing training, validation and test nodes
+    Creates the core location graph containing training, validation and test nodes
     Parameters:
         mat_file_path (str): Path to the time series .mat file
         perform_pca (bool): Indicates whether PCA dimension reduction is performed on data or not
@@ -290,7 +294,7 @@ def node_classification_core_location_graph(mat_file_path,
     labels = np.concatenate((train_labels, val_labels, test_labels)).reshape((-1, 1))
     if signal_level_graph:
         labels = np.repeat(labels, num_signals)
-    labels = torch.tensor(labels, dtype=torch.float32)
+    labels = torch.flatten(torch.tensor(labels, dtype=torch.float32))
 
     # Get total number of cores
     train_cores_num = train_mat_data.shape[0]
