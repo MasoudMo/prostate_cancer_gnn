@@ -1,4 +1,4 @@
-# prostate_cancer_gnn
+# Prostate Cancer Classifier Using Graph Neural Networks
 
 NOTE: This project is a work in progress, and a description is not finalized yet.
 
